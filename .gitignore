@@ -1,4 +1,5 @@
 .env
+.env.prod
 api/api
 cv-search-prototype
 web/node_modules/

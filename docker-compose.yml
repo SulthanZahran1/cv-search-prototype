@@ -1,0 +1,25 @@
+version: "3.8"
+
+services:
+  app:
+    build: .
+    image: cv-search-prototype:latest
+    container_name: cv-search-prototype
+    restart: unless-stopped
+    ports:
+      - "8095:8095"
+    volumes:
+      - cv-search-data:/app/data
+    env_file:
+      - .env.prod
+    environment:
+      - PORT=8095
+    networks:
+      - web
+
+volumes:
+  cv-search-data:
+
+networks:
+  web:
+    external: true
