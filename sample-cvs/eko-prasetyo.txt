@@ -1,0 +1,27 @@
+Eko Prasetyo
+Full Stack Developer
+Surabaya, Indonesia
+
+Full stack developer with 7 years experience in web and mobile application development.
+
+Skills: React, Vue, Angular, Node.js, TypeScript, JavaScript, Java, Kotlin, Swift, PostgreSQL, MongoDB, Redis, Docker, AWS, GraphQL, REST, CI/CD
+Domains: ecommerce, logistics, education
+Email: eko.prasetyo@email.com
+Phone: +62 813 4567 8901
+
+Experience:
+Senior Full Stack Developer at ShipLogistics, Surabaya (2021-present)
+- Built real-time logistics tracking platform serving 500K daily users
+- Developed microservices architecture with Node.js, GraphQL on AWS
+- Created mobile apps with React Native and Kotlin
+
+Full Stack Developer at EduTech, Surabaya (2018-2021)
+- Built learning management system with Vue.js and PostgreSQL
+- Implemented real-time collaboration features with Redis and WebSockets
+- Led migration from Angular to React improving performance 30%
+
+Web Developer at DigitalSolutions (2016-2018)
+- Ecommerce platform development with Java, Spring Boot, React
+
+Education:
+BSc Computer Science, Institut Teknologi Sepuluh Nopember (2016)

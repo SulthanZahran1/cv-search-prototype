@@ -1,15 +1,29 @@
 Bob Chen
 DevOps Engineer
-Email: bob@example.com
-Australia / Remote
+Bandung, Indonesia
 
-Summary
-DevOps and cloud engineer with 8 years of experience in CI/CD, Kubernetes, and multi-cloud infrastructure.
+DevOps engineer with 5 years experience in cloud infrastructure, CI/CD, and platform engineering.
 
-Experience
-- Managed 200+ Kubernetes clusters on AWS EKS and GKE.
-- Designed CI/CD pipelines with GitHub Actions, Terraform, and ArgoCD.
-- Built monitoring stack with Prometheus, Grafana, and OpenSearch.
-- Cloud migration from on-prem to cloud.
+Skills: Kubernetes, Docker, Terraform, AWS, GCP, CI/CD, Prometheus, Grafana, Linux, Helm, ArgoCD, Python, Bash, Ansible, Security, OAuth, JWT
+Domains: devops, cloud, security
+Email: bob.chen@email.com
+Phone: +62 821 2345 6789
 
-Skills: Kubernetes, Docker, Terraform, AWS, GCP, Azure, GitOps, Prometheus, Grafana, OpenSearch, CI/CD, Linux, Python, Go
+Experience:
+DevOps Engineer at CloudNative Labs, Bandung (2021-present)
+- Manage 150-node Kubernetes cluster across 3 AWS regions
+- Built ArgoCD-based GitOps pipeline reducing deployment time 80%
+- Implemented Prometheus/Grafana monitoring with custom alerting rules
+
+Platform Engineer at E-CommerceX (2019-2021)
+- Migrated monolith to Docker + Kubernetes on GCP
+- Built self-service CI/CD platform with GitHub Actions and Terraform
+- Reduced infrastructure costs 35% through right-sizing and spot instances
+
+Junior DevOps at HostingPro (2018-2019)
+- Linux server administration and security hardening
+- Automated backup and disaster recovery processes
+
+Education:
+BSc Information Technology, Institut Teknologi Bandung (2018)
+Certifications: CKA, AWS Solutions Architect

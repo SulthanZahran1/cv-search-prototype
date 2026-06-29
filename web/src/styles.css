@@ -191,3 +191,35 @@ body{background:var(--bg);font-family:var(--font);color:var(--text);font-size:14
   .search-controls{padding:12px 14px}
   .criteria-card{margin:12px}
 }
+
+/* EXPERIENCE SLIDER */
+.exp-slider-wrap{display:flex;align-items:center;gap:9px}
+.exp-slider{-webkit-appearance:none;appearance:none;width:110px;height:4px;border-radius:4px;background:#e2e8f0;outline:0;cursor:pointer}
+.exp-slider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:16px;height:16px;border-radius:50%;background:var(--primary);border:2px solid #fff;box-shadow:0 1px 3px rgba(15,23,42,.2);cursor:pointer;transition:all .12s}
+.exp-slider::-webkit-slider-thumb:hover{transform:scale(1.15)}
+.exp-slider::-moz-range-thumb{width:16px;height:16px;border-radius:50%;background:var(--primary);border:2px solid #fff;box-shadow:0 1px 3px rgba(15,23,42,.2);cursor:pointer}
+.exp-slider-value{font-size:12.5px;font-weight:700;color:var(--gray);min-width:48px;text-align:center}
+
+/* ALL APPLICANTS VIEW */
+.applicants-header{max-width:1180px;width:100%;margin:0 auto;padding:18px 22px 6px;display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.applicants-list{max-width:1180px;width:100%;margin:0 auto;padding:8px 22px 60px;display:flex;flex-direction:column;gap:8px}
+.applicant-row{background:#fff;border:1px solid var(--border);border-radius:var(--card-radius);padding:14px 18px;display:flex;align-items:center;gap:14px;box-shadow:0 1px 2px rgba(15,23,42,.04);transition:all .12s}
+.applicant-row:hover{box-shadow:0 3px 10px rgba(15,23,42,.08);border-color:#cbd5e1}
+.applicant-info{flex:1;min-width:0}
+.applicant-name{font-size:15px;font-weight:750}
+.applicant-meta{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:2px;font-size:12px;color:var(--gray)}
+.meta-item{display:flex;align-items:center;gap:4px}
+.meta-item svg{width:12px;height:12px;color:var(--muted)}
+.applicant-skills{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px}
+.extra-skills{font-size:11px;font-weight:650;color:var(--muted);display:flex;align-items:center;padding:0 4px}
+.applicant-actions{flex:none;display:flex;gap:6px}
+.btn-icon{width:34px;height:34px;border-radius:8px;border:1px solid var(--border);background:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--gray);transition:all .12s}
+.btn-icon:hover{background:#fafbfd;border-color:#94a3b8;color:var(--text)}
+.btn-icon-danger:hover{background:#fef2f2;border-color:#fecaca;color:#b91c1c}
+.btn-icon svg{width:15px;height:15px}
+
+@media(max-width:600px){
+  .applicant-row{flex-wrap:wrap;gap:10px}
+  .applicant-actions{margin-left:auto}
+  .exp-slider{width:80px}
+}

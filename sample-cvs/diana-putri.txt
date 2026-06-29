@@ -1,0 +1,27 @@
+Diana Putri
+Product Designer
+Jakarta, Indonesia
+
+Product designer with 4 years creating user-centered digital products for fintech and ecommerce.
+
+Skills: Figma, UI Design, UX Research, Design Systems, Prototyping, User Testing, Sketch, Adobe Creative Suite, HTML, CSS, JavaScript, React
+Domains: fintech, ecommerce
+Email: diana.putri@email.com
+Phone: +62 877 6543 2109
+
+Experience:
+Product Designer at FinTech Corp, Jakarta (2022-present)
+- Redesigned mobile banking app improving NPS from 32 to 68
+- Built reusable design system with Figma for 4 product teams
+- Conducted user research with 200+ participants across Indonesia
+
+UX Designer at RetailEase, Jakarta (2020-2022)
+- Led redesign of ecommerce checkout flow improving conversion 22%
+- Created interactive prototypes with Figma and user testing sessions
+- Collaborated with engineering on React component implementation
+
+Junior Designer at CreativeAgency (2019-2020)
+- Web and mobile design for client projects
+
+Education:
+BDes Visual Communication Design, Binus University (2019)

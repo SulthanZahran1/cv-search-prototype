@@ -1,15 +1,29 @@
 Alice Smith
-Data Scientist
-Email: alice@example.com
+Lead Data Scientist
 Singapore
 
-Summary
-Data scientist with 4 years of experience in NLP, LLM RAG, and machine learning pipelines.
+Data scientist with 8 years experience in machine learning and NLP product development.
 
-Experience
-- Built RAG systems using Python, PyTorch, and Elasticsearch.
-- Fine-tuned LLMs for finance and e-commerce use cases.
-- Deployed ML models on AWS SageMaker and GCP Vertex AI.
-- Worked with NLP, embeddings, and vector search.
+Skills: Python, Machine Learning, NLP, PyTorch, TensorFlow, LLM, RAG, Spark, Airflow, Pandas, PostgreSQL, AWS, Docker, Kubernetes, Elasticsearch
+Domains: AI, machine learning, ecommerce
+Email: alice.smith@email.com
+Phone: +65 9123 4567
 
-Skills: Python, PyTorch, Elasticsearch, AWS, GCP, NLP, LLM, RAG, Machine Learning, Docker, Kafka
+Experience:
+Lead Data Scientist at ShopTech AI, Singapore (2021-present)
+- Led RAG-based LLM pipeline for product search serving 2M daily queries
+- Built PyTorch model serving infrastructure on AWS SageMaker
+- Reduced search latency 60% with Elasticsearch + embedding reranking
+
+Data Scientist at RetailCorp, Singapore (2018-2021)
+- Developed ML recommendation engine driving 15% revenue increase
+- Built NLP pipeline for automated product categorization
+- Streaming data pipeline with Spark and Airflow
+
+ML Engineer at StartupLabs (2016-2018)
+- Computer vision model for retail inventory tracking
+- Implemented MLOps with Docker, MLflow on Kubernetes
+
+Education:
+MSc Machine Learning, National University of Singapore (2016)
+BSc Computer Science, University of Melbourne (2014)

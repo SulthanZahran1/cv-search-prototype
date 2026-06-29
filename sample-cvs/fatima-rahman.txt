@@ -1,0 +1,24 @@
+Fatima Rahman
+Backend Engineer
+Remote, Indonesia
+
+Backend engineer with 3 years experience specializing in distributed systems and API development.
+
+Skills: Go, Python, PostgreSQL, Redis, Kafka, Docker, Kubernetes, AWS, REST, gRPC, GraphQL, CI/CD, Linux, Git
+Domains: fintech, payments
+Email: fatima.rahman@email.com
+Phone: +62 856 7890 1234
+
+Experience:
+Backend Engineer at PayTech, Remote (2023-present)
+- Built payment gateway API handling 10K TPS with Go and PostgreSQL
+- Implemented idempotency and retry mechanisms for banking integrations
+- Developed monitoring dashboards with Grafana and custom metrics
+
+Junior Backend Engineer at StartupXYZ (2022-2023)
+- RESTful API development in Python with FastAPI
+- Built ETL pipeline for payment reconciliation with Kafka and Redis
+- Database optimization reducing query times by 70%
+
+Education:
+BSc Computer Science, Universitas Gadjah Mada (2022)

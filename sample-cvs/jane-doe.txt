@@ -1,15 +1,27 @@
 Jane Doe
-Senior Backend Engineer
-Email: jane@example.com
+Software Engineer
+Jakarta, Indonesia
+
+I'm a software engineer with 6 years of experience building scalable backend services.
+
+Skills: Go, Kafka, Fintech, Redis, Docker, Kubernetes, AWS, PostgreSQL, REST, gRPC, TypeScript, React
+Domains: fintech, payments, cloud
+Email: jane.doe@email.com
 Phone: +62 812 3456 7890
-Jakarta / Remote
 
-Summary
-Senior backend engineer with 6 years of experience building fintech payment platforms.
+Experience:
+Senior Backend Engineer at FinTech Corp, Jakarta (2022-present)
+- Built high-throughput payment processing pipeline handling 50k TPS using Go and Kafka
+- Designed distributed transaction system with saga pattern on PostgreSQL
+- Reduced API latency 40% by migrating from REST to gRPC with Redis caching
 
-Experience
-- Built Go microservices for payment reconciliation using PostgreSQL, Kafka, Redis, and Docker.
-- Designed REST and gRPC APIs deployed on Kubernetes and AWS.
-- Worked with security teams on JWT, OAuth, monitoring with Prometheus and Grafana.
+Backend Engineer at TechStartup, Jakarta (2019-2022)
+- Developed core banking API layer processing $2B monthly transaction volume
+- Implemented CI/CD pipelines with Docker and Kubernetes on AWS
+- Built real-time fraud detection system using Kafka Streams
 
-Skills: Go, Kafka, Postgres, Redis, Docker, Kubernetes, AWS, REST, gRPC, Security
+Junior Developer at DigitalAgency (2017-2019)
+- Full-stack feature development with React, TypeScript, Go
+
+Education:
+BSc Computer Science, Universitas Indonesia (2017)

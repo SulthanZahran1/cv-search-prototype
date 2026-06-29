@@ -37,6 +37,11 @@ const api = {
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
+  },
+  async deleteCandidate(id) {
+    const res = await fetch(`/api/candidates/${id}`, { method: 'DELETE' });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
   }
 };
 
@@ -326,6 +331,10 @@ function App() {
 
     {/* TABS */}
     <div className="tabs">
+      <button className={`tab ${view === 'applicants' ? 'active' : ''}`} onClick={() => setView('applicants')}>
+        <Users size={16} /> All Applicants <span className="tab-badge">{totalCandidates}</span>
+      </button>
+      <div className="tab-divider" />
       <button className={`tab ${view === 'prescreen' ? 'active' : ''}`} onClick={() => setView('prescreen')}>
         <ListChecks size={16} /> Prescreening
       </button>
@@ -407,14 +416,12 @@ function App() {
             />
           </FilterGroup>
           <FilterGroup label="EXPERIENCE">
-            <SegControl
-              options={[
-                { label: 'Any', value: 0 },
-                { label: '3+ yrs', value: 3 },
-                { label: '5+ yrs', value: 5 }
-              ]}
-              value={minYears} onChange={setMinYears}
-            />
+            <div className="exp-slider-wrap">
+              <input type="range" min="0" max="15" value={minYears}
+                onChange={e => setMinYears(Number(e.target.value))}
+                className="exp-slider" />
+              <span className="exp-slider-value">{minYears === 0 ? 'Any' : `${minYears}+ yrs`}</span>
+            </div>
           </FilterGroup>
           <FilterGroup label="LOCATION">
             <select value={location} onChange={e => setLocation(e.target.value)} className="select-filter">
@@ -526,6 +533,63 @@ function App() {
       </div>
     </div>}
 
+    {/* ====== ALL APPLICANTS VIEW ====== */}
+    {view === 'applicants' && <div className="view-container">
+      <div className="applicants-header">
+        <div className="results-label">ALL CVS · {totalCandidates} CANDIDATES</div>
+        <div className="results-meta">
+          <Database size={13} /> Seed with sample CVs
+          <span className="meta-dot">·</span>
+          Drop files to add
+        </div>
+      </div>
+      <div className="applicants-list">
+        {candidates.length === 0 && <div className="empty-state">
+          <Users size={34} />
+          <div className="empty-title">No CVs uploaded yet</div>
+          <div className="empty-desc">Upload CVs above to start building your candidate pipeline.</div>
+        </div>}
+        {candidates.map((c, i) => {
+          const [avBg, avColor] = avatarPalette(i);
+          const skillPreview = (c.skills || []).slice(0, 4);
+          const extraSkills = Math.max(0, (c.skills || []).length - 4);
+          return <div key={c.id} className="applicant-row">
+            <div className="card-avatar" style={{ background: avBg, color: avColor, width: 44, height: 44, fontSize: 14 }}>
+              {initials(c.name)}
+            </div>
+            <div className="applicant-info">
+              <div className="applicant-name">{c.name}</div>
+              <div className="applicant-meta">
+                {c.current_title && <span className="meta-item"><Briefcase size={12} /> {c.current_title}</span>}
+                {c.years_experience > 0 && <span className="meta-item"><Clock size={12} /> {c.years_experience} yrs</span>}
+                {c.locations && c.locations[0] && <span className="meta-item"><ArrowDownWideNarrow size={12} /> {c.locations[0]}</span>}
+              </div>
+              <div className="applicant-skills">
+                {skillPreview.map((s, j) =>
+                  <span key={j} className="token-chip" style={{ fontSize: 11, padding: '2px 7px' }}>{s}</span>
+                )}
+                {extraSkills > 0 && <span className="extra-skills">+{extraSkills} more</span>}
+              </div>
+            </div>
+            <div className="applicant-actions">
+              <button className="btn-icon" title="View CV" onClick={() => setDrawerId(c.id)}>
+                <FileText size={15} />
+              </button>
+              <button className="btn-icon btn-icon-danger" title="Delete" onClick={async () => {
+                if (!confirm(`Delete ${c.name}'s CV?`)) return;
+                try {
+                  await api.deleteCandidate(c.id);
+                  await refresh();
+                } catch (e) { setError(e.message); }
+              }}>
+                <XCircle size={15} />
+              </button>
+            </div>
+          </div>;
+        })}
+      </div>
+    </div>}
+
     {/* ====== PRESCREEN VIEW ====== */}
     {view === 'prescreen' && <div className="view-container">
       <div className="criteria-card">
@@ -553,9 +617,11 @@ function App() {
           </div>
           <div>
             <div className="criteria-label">MIN. EXPERIENCE</div>
-            <div className="seg-control">
-              <button className={`seg-btn ${preMinYears === 3 ? 'active' : ''}`} onClick={() => { setPreMinYears(3); setPreRan(false); }}>3+ yrs</button>
-              <button className={`seg-btn ${preMinYears === 5 ? 'active' : ''}`} onClick={() => { setPreMinYears(5); setPreRan(false); }}>5+ yrs</button>
+            <div className="exp-slider-wrap">
+              <input type="range" min="0" max="15" value={preMinYears}
+                onChange={e => { setPreMinYears(Number(e.target.value)); setPreRan(false); }}
+                className="exp-slider" />
+              <span className="exp-slider-value">{preMinYears === 0 ? 'Any' : `${preMinYears}+ yrs`}</span>
             </div>
           </div>
         </div>

@@ -124,6 +124,26 @@ func (s *Store) AllCandidates() []Candidate {
 	return out
 }
 
+func (s *Store) DeleteCandidate(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, c := range s.data.Candidates {
+		if c.ID == id {
+			s.data.Candidates = append(s.data.Candidates[:i], s.data.Candidates[i+1:]...)
+			// Also remove associated jobs
+			remaining := []Job{}
+			for _, j := range s.data.Jobs {
+				if j.CandidateID != id {
+					remaining = append(remaining, j)
+				}
+			}
+			s.data.Jobs = remaining
+			return s.saveLocked()
+		}
+	}
+	return fmt.Errorf("candidate %s not found", id)
+}
+
 func (s *Store) AddJob(j Job) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -665,6 +685,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", s.health)
 	mux.HandleFunc("GET /api/candidates", s.candidates)
+	mux.HandleFunc("DELETE /api/candidates/{id}", s.deleteCandidate)
 	mux.HandleFunc("POST /api/upload", s.upload)
 	mux.HandleFunc("GET /api/jobs", s.getJobs)
 	mux.HandleFunc("POST /api/search", s.search)
@@ -699,6 +720,24 @@ func (s *Server) candidates(w http.ResponseWriter, r *http.Request) {
 		items[i].RawText = ""
 	}
 	writeJSON(w, map[string]any{"candidates": items})
+}
+
+func (s *Server) deleteCandidate(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		http.Error(w, "id required", http.StatusBadRequest)
+		return
+	}
+	if err := s.store.DeleteCandidate(id); err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	// Also clean up associated files
+	textPath := filepath.Join(s.dataDir, "texts", id+".txt")
+	os.Remove(textPath)
+	uploadPath := filepath.Join(s.uploadDir, id+"-work")
+	os.Remove(uploadPath)
+	writeJSON(w, map[string]any{"ok": true})
 }
 
 // ── Async upload: creates jobs, returns immediately ─────────────────────
