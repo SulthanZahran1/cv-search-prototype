@@ -1,0 +1,15 @@
+Alice Smith
+Data Scientist
+Email: alice@example.com
+Singapore
+
+Summary
+Data scientist with 4 years of experience in NLP, LLM RAG, and machine learning pipelines.
+
+Experience
+- Built RAG systems using Python, PyTorch, and Elasticsearch.
+- Fine-tuned LLMs for finance and e-commerce use cases.
+- Deployed ML models on AWS SageMaker and GCP Vertex AI.
+- Worked with NLP, embeddings, and vector search.
+
+Skills: Python, PyTorch, Elasticsearch, AWS, GCP, NLP, LLM, RAG, Machine Learning, Docker, Kafka

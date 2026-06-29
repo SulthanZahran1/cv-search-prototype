@@ -1,0 +1,15 @@
+Bob Chen
+DevOps Engineer
+Email: bob@example.com
+Australia / Remote
+
+Summary
+DevOps and cloud engineer with 8 years of experience in CI/CD, Kubernetes, and multi-cloud infrastructure.
+
+Experience
+- Managed 200+ Kubernetes clusters on AWS EKS and GKE.
+- Designed CI/CD pipelines with GitHub Actions, Terraform, and ArgoCD.
+- Built monitoring stack with Prometheus, Grafana, and OpenSearch.
+- Cloud migration from on-prem to cloud.
+
+Skills: Kubernetes, Docker, Terraform, AWS, GCP, Azure, GitOps, Prometheus, Grafana, OpenSearch, CI/CD, Linux, Python, Go

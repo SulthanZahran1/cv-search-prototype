@@ -1,0 +1,15 @@
+Jane Doe
+Senior Backend Engineer
+Email: jane@example.com
+Phone: +62 812 3456 7890
+Jakarta / Remote
+
+Summary
+Senior backend engineer with 6 years of experience building fintech payment platforms.
+
+Experience
+- Built Go microservices for payment reconciliation using PostgreSQL, Kafka, Redis, and Docker.
+- Designed REST and gRPC APIs deployed on Kubernetes and AWS.
+- Worked with security teams on JWT, OAuth, monitoring with Prometheus and Grafana.
+
+Skills: Go, Kafka, Postgres, Redis, Docker, Kubernetes, AWS, REST, gRPC, Security

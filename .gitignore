@@ -1,0 +1,10 @@
+.env
+api/api
+cv-search-prototype
+web/node_modules/
+web/dist/
+data/store.json
+data/uploads/*
+!.gitkeep
+.DS_Store
+web/public/download/
