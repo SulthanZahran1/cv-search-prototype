@@ -8,7 +8,7 @@ This is an MVP/demo CV Intelligence Index, not a full recruitment ATS. It proves
 
 Chosen option: **C — extraction + query understanding + reranking/explanations**, guarded by deterministic retrieval.
 
-The backend first extracts text and creates a canonical candidate profile. If an OpenAI-compatible LLM is configured, it asks the model to return structured candidate JSON. Without a key, the app uses deterministic extraction so the hosted prototype remains testable.
+The backend first tries Gemini multimodal extraction for PDFs/images so scanned CVs and modern visual layouts do not silently fail. DOCX/TXT still go through local text extraction. Once text or structured fields exist, the app uses an OpenAI-compatible LLM (DeepSeek in the hosted deployment) to return structured candidate JSON when available. Without model keys, deterministic extraction keeps the hosted prototype testable.
 
 Search is hybrid:
 
@@ -22,7 +22,8 @@ Search is hybrid:
 |---|---|---|
 | Single CV upload | Real | Multipart upload endpoint. |
 | Batch CV upload | Real | Same endpoint accepts multiple files. |
-| PDF text extraction | Real | Uses `pdftotext` when available. |
+| PDF/image extraction | Real | Gemini multimodal OCR first for PDF/PNG/JPG/WebP; avoids scanned-PDF silence. |
+| PDF text fallback | Real | Uses `pdftotext` when Gemini is unavailable or fails. |
 | DOCX text extraction | Real basic | Reads `word/document.xml` from DOCX zip. |
 | LLM extraction | Real when env configured | OpenAI-compatible `/chat/completions`. |
 | LLM rerank/explanation | Real when env configured | Falls back to deterministic scoring. |

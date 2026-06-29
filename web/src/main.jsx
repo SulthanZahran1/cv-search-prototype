@@ -166,7 +166,8 @@ function App() {
       <div className="stats">
         <Stat icon={<Users/>} label="Candidates" value={stats.candidates}/>
         <Stat icon={<FileText/>} label="Detected skills" value={stats.skills}/>
-        <Stat icon={<Sparkles/>} label="LLM mode" value={stats.llm ? 'Live' : 'Fallback'}/>
+        <Stat icon={<Sparkles/>} label="LLM rerank" value={stats.llm ? 'Live' : 'Fallback'}/>
+        <Stat icon={<FileText/>} label="Cloud OCR" value={health?.ocr_enabled ? 'Gemini' : 'Off'}/>
         {pendingJobs.length > 0 && <Stat icon={<Loader2 className="spin"/>} label="Processing" value={pendingJobs.length}/>}
       </div>
     </header>
@@ -176,9 +177,9 @@ function App() {
     <main className="grid">
       <section className="card upload-card">
         <h2><Upload size={20}/> Add CVs</h2>
-        <p>Singular or batch. Supported: PDF, DOCX, TXT/MD. Background workers extract and index each file.</p>
+        <p>Singular or batch. Supported: PDF, DOCX, TXT/MD, PNG/JPG/WebP. PDFs/images use Gemini cloud OCR first; text extraction remains as fallback.</p>
         <label className="drop">
-          <input type="file" multiple accept=".pdf,.docx,.txt,.md" onChange={e => doUpload(e.target.files)} />
+          <input type="file" multiple accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.webp" onChange={e => doUpload(e.target.files)} />
           <Upload size={36}/>
           <strong>{uploading ? 'Queuing CVs…' : 'Drop/click to upload CVs'}</strong>
           <span>Files are processed asynchronously — watch the status below.</span>

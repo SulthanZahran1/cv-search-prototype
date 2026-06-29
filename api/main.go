@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
@@ -176,15 +177,17 @@ func (s *Store) saveLocked() error {
 type JobQueue struct {
 	store     *Store
 	llm       *LLMClient
+	gemini    *GeminiClient
 	uploadDir string
 	textDir   string
 	pending   chan string
 }
 
-func NewJobQueue(store *Store, llm *LLMClient, uploadDir, textDir string) *JobQueue {
+func NewJobQueue(store *Store, llm *LLMClient, gemini *GeminiClient, uploadDir, textDir string) *JobQueue {
 	return &JobQueue{
 		store:     store,
 		llm:       llm,
+		gemini:    gemini,
 		uploadDir: uploadDir,
 		textDir:   textDir,
 		pending:   make(chan string, 100),
@@ -216,11 +219,34 @@ func (jq *JobQueue) process(ctx context.Context, jobID string) {
 	textPath := filepath.Join(jq.textDir, jobID+".txt")
 	var text string
 
-	// Extract text
+	// Extract text or structured profile
 	raw, err := os.ReadFile(stored)
 	if err != nil {
 		jq.store.UpdateJob(jobID, func(j *Job) { j.Status = JobFailed; j.Error = fmt.Sprintf("read temp: %v", err) })
 		return
+	}
+
+	// Cloud multimodal OCR/extraction first for PDFs and images. This avoids silent
+	// pdftotext failure on scanned PDFs and preserves visual/layout cues better
+	// than OCR -> text -> LLM for modern CV designs.
+	mode := "fallback"
+	var c Candidate
+	if jq.gemini != nil && jq.gemini.Enabled() && isGeminiDocument(job.FileName) {
+		if got, err := jq.gemini.ExtractProfileFromDocument(ctx, job.FileName, raw); err == nil {
+			c = got
+			mode = "gemini-ocr"
+			text = candidateSearchText(c)
+			goto indexCandidate
+		} else {
+			log.Printf("Gemini OCR extraction failed for %s: %v; falling back to text extraction", job.FileName, err)
+			if isImageFile(job.FileName) {
+				jq.store.UpdateJob(jobID, func(j *Job) {
+					j.Status = JobFailed
+					j.Error = "cloud OCR failed and image files have no local text fallback"
+				})
+				return
+			}
+		}
 	}
 
 	if strings.HasSuffix(strings.ToLower(job.FileName), ".pdf") {
@@ -255,15 +281,14 @@ func (jq *JobQueue) process(ctx context.Context, jobID string) {
 		return
 	}
 
-	// Save extracted text
+indexCandidate:
+	// Save extracted/search text
 	os.WriteFile(textPath, []byte(text), 0o644)
 
 	jq.store.UpdateJob(jobID, func(j *Job) { j.Status = JobIndexing })
 
-	// Extract candidate profile
-	mode := "fallback"
-	var c Candidate
-	if jq.llm.Enabled() {
+	// Extract candidate profile from text if Gemini did not already produce one
+	if c.Name == "" && jq.llm.Enabled() {
 		if got, err := jq.llm.ExtractProfile(ctx, job.FileName, text); err == nil {
 			c = got
 			mode = "llm"
@@ -271,7 +296,7 @@ func (jq *JobQueue) process(ctx context.Context, jobID string) {
 			log.Printf("LLM extraction failed for %s: %v; using fallback", job.FileName, err)
 			c = fallbackExtract(job.FileName, text)
 		}
-	} else {
+	} else if c.Name == "" {
 		c = fallbackExtract(job.FileName, text)
 	}
 
@@ -298,6 +323,159 @@ func (jq *JobQueue) process(ctx context.Context, jobID string) {
 }
 
 // ── LLM client ──────────────────────────────────────────────────────────
+
+// ── Gemini multimodal OCR/extraction client ─────────────────────────────
+
+type GeminiClient struct {
+	APIKey string
+	Model  string
+	HTTP   *http.Client
+}
+
+func NewGeminiClient() *GeminiClient {
+	key := getenvFirst("GEMINI_API_KEY", "GOOGLE_API_KEY", "OCR_API_KEY")
+	model := strings.TrimPrefix(getenvDefault("GEMINI_MODEL", "gemini-2.5-flash-lite"), "models/")
+	return &GeminiClient{APIKey: key, Model: model, HTTP: &http.Client{Timeout: 90 * time.Second}}
+}
+
+func (g *GeminiClient) Enabled() bool { return strings.TrimSpace(g.APIKey) != "" }
+
+type geminiReq struct {
+	Contents         []geminiContent      `json:"contents"`
+	GenerationConfig geminiGenerationConf `json:"generationConfig"`
+}
+
+type geminiGenerationConf struct {
+	Temperature      float64 `json:"temperature"`
+	ResponseMimeType string  `json:"responseMimeType"`
+}
+
+type geminiContent struct {
+	Role  string       `json:"role,omitempty"`
+	Parts []geminiPart `json:"parts"`
+}
+
+type geminiPart struct {
+	Text       string            `json:"text,omitempty"`
+	InlineData *geminiInlineData `json:"inline_data,omitempty"`
+}
+
+type geminiInlineData struct {
+	MimeType string `json:"mime_type"`
+	Data     string `json:"data"`
+}
+
+type geminiResp struct {
+	Candidates []struct {
+		Content struct {
+			Parts []struct {
+				Text string `json:"text"`
+			} `json:"parts"`
+		} `json:"content"`
+	} `json:"candidates"`
+	Error any `json:"error,omitempty"`
+}
+
+func (g *GeminiClient) ExtractProfileFromDocument(ctx context.Context, fileName string, raw []byte) (Candidate, error) {
+	if !g.Enabled() {
+		return Candidate{}, errors.New("gemini disabled")
+	}
+	mime := mimeForFile(fileName)
+	if mime == "" {
+		return Candidate{}, fmt.Errorf("unsupported gemini document type: %s", fileName)
+	}
+
+	prompt := `Extract this CV/resume into strict JSON. Return ONLY JSON with keys: name,email,phone,current_title,years_experience,skills,domains,locations,seniority,summary,evidence. evidence is an array of {claim,source_snippet}. Preserve contact details exactly, especially leading + in phone numbers. Use empty strings/arrays if unknown. Never invent facts not supported by the document.`
+	body := geminiReq{
+		GenerationConfig: geminiGenerationConf{Temperature: 0.0, ResponseMimeType: "application/json"},
+		Contents: []geminiContent{{Role: "user", Parts: []geminiPart{
+			{Text: "File: " + fileName + "\n\n" + prompt},
+			{InlineData: &geminiInlineData{MimeType: mime, Data: base64.StdEncoding.EncodeToString(raw)}},
+		}}},
+	}
+	b, _ := json.Marshal(body)
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", g.Model, g.APIKey)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(b))
+	if err != nil {
+		return Candidate{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	res, err := g.HTTP.Do(req)
+	if err != nil {
+		return Candidate{}, err
+	}
+	defer res.Body.Close()
+	rb, _ := io.ReadAll(io.LimitReader(res.Body, 8<<20))
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		return Candidate{}, fmt.Errorf("gemini status %d: %s", res.StatusCode, string(rb))
+	}
+	var gr geminiResp
+	if err := json.Unmarshal(rb, &gr); err != nil {
+		return Candidate{}, err
+	}
+	if len(gr.Candidates) == 0 || len(gr.Candidates[0].Content.Parts) == 0 {
+		return Candidate{}, errors.New("gemini returned no content")
+	}
+	content := strings.TrimSpace(gr.Candidates[0].Content.Parts[0].Text)
+	content = extractJSONObject(content)
+	var c Candidate
+	if err := json.Unmarshal([]byte(content), &c); err != nil {
+		return Candidate{}, fmt.Errorf("parse gemini JSON: %w; content=%s", err, truncate(content, 300))
+	}
+	cleanCandidate(&c)
+	return c, nil
+}
+
+func extractJSONObject(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.TrimPrefix(s, "```json")
+	s = strings.TrimPrefix(s, "```")
+	s = strings.TrimSuffix(s, "```")
+	s = strings.TrimSpace(s)
+	start := strings.Index(s, "{")
+	end := strings.LastIndex(s, "}")
+	if start >= 0 && end > start {
+		return s[start : end+1]
+	}
+	return s
+}
+
+func isGeminiDocument(fileName string) bool { return mimeForFile(fileName) != "" }
+
+func isImageFile(fileName string) bool {
+	switch strings.ToLower(filepath.Ext(fileName)) {
+	case ".png", ".jpg", ".jpeg", ".webp":
+		return true
+	default:
+		return false
+	}
+}
+
+func mimeForFile(fileName string) string {
+	switch strings.ToLower(filepath.Ext(fileName)) {
+	case ".pdf":
+		return "application/pdf"
+	case ".png":
+		return "image/png"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".webp":
+		return "image/webp"
+	default:
+		return ""
+	}
+}
+
+func candidateSearchText(c Candidate) string {
+	parts := []string{c.Name, c.Email, c.Phone, c.CurrentTitle, c.Seniority, c.Summary}
+	parts = append(parts, c.Skills...)
+	parts = append(parts, c.Domains...)
+	parts = append(parts, c.Locations...)
+	for _, e := range c.Evidence {
+		parts = append(parts, e.Claim, e.SourceSnippet)
+	}
+	return strings.Join(parts, "\n")
+}
 
 type LLMClient struct {
 	APIKey  string
@@ -449,6 +627,7 @@ func (l *LLMClient) Rerank(ctx context.Context, query string, results []SearchRe
 type Server struct {
 	store     *Store
 	llm       *LLMClient
+	gemini    *GeminiClient
 	jobs      *JobQueue
 	dataDir   string
 	uploadDir string
@@ -463,6 +642,7 @@ func main() {
 	}
 
 	llm := NewLLMClient()
+	gemini := NewGeminiClient()
 	uploadDir := filepath.Join(dataDir, "uploads")
 	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
 		log.Fatal(err)
@@ -472,8 +652,8 @@ func main() {
 		log.Fatal(err)
 	}
 
-	jobs := NewJobQueue(store, llm, uploadDir, textDir)
-	s := &Server{store: store, llm: llm, jobs: jobs, dataDir: dataDir, uploadDir: uploadDir}
+	jobs := NewJobQueue(store, llm, gemini, uploadDir, textDir)
+	s := &Server{store: store, llm: llm, gemini: gemini, jobs: jobs, dataDir: dataDir, uploadDir: uploadDir}
 
 	// Start background worker pool
 	workerCount := 3
@@ -490,7 +670,7 @@ func main() {
 	mux.HandleFunc("POST /api/search", s.search)
 	mux.HandleFunc("/", serveSPA("web/dist"))
 
-	log.Printf("CV Search Prototype listening on :%s (LLM enabled: %v)", port, s.llm.Enabled())
+	log.Printf("CV Search Prototype listening on :%s (LLM enabled: %v, Gemini OCR enabled: %v)", port, s.llm.Enabled(), s.gemini.Enabled())
 	log.Fatal(http.ListenAndServe(":"+port, logReq(mux)))
 }
 
@@ -506,7 +686,8 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, map[string]any{
-		"ok": true, "llm_enabled": s.llm.Enabled(),
+		"ok": true, "llm_enabled": s.llm.Enabled(), "ocr_enabled": s.gemini.Enabled(),
+		"ocr_model":    s.gemini.Model,
 		"candidates":   len(s.store.AllCandidates()),
 		"pending_jobs": pending, "failed_jobs": failed,
 	})

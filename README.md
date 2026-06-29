@@ -6,8 +6,9 @@ LLM-assisted CV upload, extraction, indexing, and recruiter search prototype bui
 
 - Single CV upload
 - Batch CV upload
-- PDF, DOCX, TXT/MD text extraction
-- Candidate profile extraction
+- PDF, DOCX, TXT/MD, PNG/JPG/WebP upload
+- Gemini multimodal OCR/extraction for PDFs/images
+- Candidate profile extraction with DeepSeek/OpenAI-compatible fallback
 - Natural-language recruiter search
 - Hybrid deterministic retrieval + optional LLM reranking/explanations
 - Self-contained Go server serving the React UI and API
@@ -23,14 +24,17 @@ go run ./api
 
 Open http://localhost:8095.
 
-## Optional LLM Configuration
+## Optional LLM/OCR Configuration
 
-The app works without an LLM key using deterministic fallback extraction. For live LLM mode, set:
+The app works without model keys using deterministic fallback extraction. For live mode, set DeepSeek/OpenAI-compatible config for text extraction/rerank and Gemini for multimodal PDF/image OCR:
 
 ```bash
 LLM_API_KEY=...
-LLM_BASE_URL=https://api.openai.com/v1
-LLM_MODEL=gpt-4o-mini
+LLM_BASE_URL=https://api.deepseek.com/v1
+LLM_MODEL=deepseek-chat
+
+GEMINI_API_KEY=...
+GEMINI_MODEL=gemini-2.5-flash-lite
 ```
 
 For OpenRouter-style routing:
@@ -52,11 +56,11 @@ LLM_MODEL=openai/gpt-4o-mini
 ```text
 React UI
   ↓
-Go API
+Go API + async worker queue
   ↓
-Text extraction
+Gemini multimodal OCR for PDFs/images OR local text extraction for DOCX/TXT
   ↓
-LLM/fallback candidate profile extraction
+Structured candidate profile (Gemini / DeepSeek / deterministic fallback)
   ↓
 JSON store
   ↓
