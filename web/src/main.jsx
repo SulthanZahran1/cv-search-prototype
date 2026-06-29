@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Upload, Search, FileText, Sparkles, Users, AlertCircle, CheckCircle2, Clock, Loader2, XCircle } from 'lucide-react';
+import { Upload, Search, FileText, Sparkles, Users, AlertCircle, CheckCircle2, Clock, Loader2, XCircle, X, Plus, Database, Zap, ArrowDownWideNarrow, Quote, GitBranch, Check, Minus, FileSearch2, ScanSearch, SearchX, ListChecks, FileText as FileIcon, Briefcase, ArrowRight, UserCheck, Download, ChevronDown, Play, Box } from 'lucide-react';
 import './styles.css';
 
 const api = {
@@ -24,11 +24,16 @@ const api = {
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
-  async search(query) {
+  async search(query, opts = {}) {
     const res = await fetch('/api/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query })
+      body: JSON.stringify({
+        query,
+        mode: opts.mode || 'exact',
+        min_years: opts.minYears || 0,
+        location: opts.location || 'any',
+      })
     });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
@@ -50,44 +55,74 @@ function useJobPolling(jobIds) {
   useEffect(() => {
     if (!jobIds.length) return;
     let active = true;
-    let pollCount = 0;
-
-    async function poll() {
-      pollCount++;
-      try {
-        // Fetch all requested jobs
-        const results = await Promise.all(
-          jobIds.map(id => api.job(id).then(r => r.job).catch(() => null))
-        );
+    function poll() {
+      Promise.all(jobIds.map(id =>
+        api.job(id).then(r => r.job).catch(() => null)
+      )).then(results => {
         if (!active) return;
-
         const update = {};
         let allDone = true;
         jobIds.forEach((id, i) => {
           update[id] = results[i];
-          if (results[i] && results[i].status !== 'completed' && results[i].status !== 'failed') {
-            allDone = false;
-          }
+          if (results[i] && results[i].status !== 'completed' && results[i].status !== 'failed') allDone = false;
         });
-
         const str = JSON.stringify(update);
-        if (str !== prevStr.current) {
-          prevStr.current = str;
-          setJobs(prev => ({ ...prev, ...update }));
-        }
-
-        if (allDone) return; // stop polling
-      } catch { /* retry */ }
-
-      if (active) setTimeout(poll, 1500);
+        if (str !== prevStr.current) { prevStr.current = str; setJobs(prev => ({ ...prev, ...update })); }
+        if (!allDone) setTimeout(poll, 1500);
+      });
     }
-
-    // Immediate first poll after short delay to let workers start
     setTimeout(poll, 500);
     return () => { active = false; };
   }, [jobIds.sort().join(',')]);
-
   return jobs;
+}
+
+function initials(name) {
+  return name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
+}
+function avatarPalette(id) {
+  const p = [['#a5003412', '#a50034'], ['#00766f12', '#00766f'], ['#7c3aed12', '#7c3aed'], ['#b4530912', '#b45309'], ['#2563eb12', '#2563eb']];
+  return p[id % p.length];
+}
+function escHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function highlightText(text, queryTokens) {
+  const lower = text.toLowerCase();
+  const hits = [];
+  queryTokens.forEach(tok => {
+    const t = tok.toLowerCase();
+    if (!t) return;
+    let i = 0;
+    while ((i = lower.indexOf(t, i)) !== -1) { hits.push([i, i + t.length]); i += t.length; }
+  });
+  hits.sort((a, b) => a[0] - b[0]);
+  const merged = [];
+  hits.forEach(h => { const l = merged[merged.length - 1]; if (l && h[0] <= l[1]) l[1] = Math.max(l[1], h[1]); else merged.push([...h]); });
+  let out = '', pos = 0;
+  merged.forEach(([s, e]) => {
+    out += escHtml(text.slice(pos, s));
+    out += `<span class="hl">${escHtml(text.slice(s, e))}</span>`;
+    pos = e;
+  });
+  out += escHtml(text.slice(pos));
+  return { html: out, count: merged.length };
+}
+
+function snippetAround(text, tokens, maxPre = 80, maxPost = 140) {
+  const lower = text.toLowerCase();
+  const lowerTokens = tokens.map(t => t.toLowerCase());
+  // find earliest hit
+  let first = Infinity;
+  lowerTokens.forEach(t => { const idx = lower.indexOf(t); if (idx >= 0 && idx < first) first = idx; });
+  if (first === Infinity) return { html: escHtml(text.slice(0, 280)), count: 0 };
+  const start = Math.max(0, first - maxPre);
+  const end = Math.min(text.length, first + maxPost);
+  const pre = start > 0 ? '… ' : '';
+  const post = end < text.length ? ' …' : '';
+  const seg = highlightText(text.slice(start, end), tokens);
+  return { html: pre + seg.html + post, count: seg.count };
 }
 
 function App() {
@@ -96,36 +131,47 @@ function App() {
   const [uploading, setUploading] = useState(false);
   const [activeJobIds, setActiveJobIds] = useState([]);
   const [uploadFileNames, setUploadFileNames] = useState({});
-  const [query, setQuery] = useState('backend engineer with Go Kafka Postgres fintech remote');
+  const [view, setView] = useState('search'); // 'search' | 'prescreen'
+  const [tokens, setTokens] = useState([]);
+  const [input, setInput] = useState('');
+  const [focused, setFocused] = useState(false);
+  const [mode, setMode] = useState('exact'); // 'exact' | 'semantic'
+  const [minYears, setMinYears] = useState(0);
+  const [location, setLocation] = useState('any');
   const [searching, setSearching] = useState(false);
   const [searchResult, setSearchResult] = useState(null);
   const [error, setError] = useState('');
+  const [drawerId, setDrawerId] = useState(null);
+
+  // Prescreen state
+  const [reqSkills, setReqSkills] = useState([]);
+  const [reqInput, setReqInput] = useState('');
+  const [preMinYears, setPreMinYears] = useState(5);
+  const [preRan, setPreRan] = useState(false);
+  const [preResults, setPreResults] = useState([]);
 
   const jobData = useJobPolling(activeJobIds);
 
   async function refresh() {
     const [h, c] = await Promise.all([api.health(), api.candidates()]);
-    setHealth(h); setCandidates(c.candidates || []);
+    setHealth(h);
+    setCandidates(c.candidates || []);
   }
   useEffect(() => { refresh().catch(e => setError(e.message)); }, []);
 
-  // When all jobs resolve, refresh candidates
   useEffect(() => {
     if (!activeJobIds.length) return;
-    const allDone = activeJobIds.every(id => {
-      const j = jobData[id];
-      return j && (j.status === 'completed' || j.status === 'failed');
-    });
-    if (allDone) {
-      refresh().catch(e => setError(e.message));
-    }
+    const allDone = activeJobIds.every(id => { const j = jobData[id]; return j && (j.status === 'completed' || j.status === 'failed'); });
+    if (allDone) refresh().catch(e => setError(e.message));
   }, [jobData, activeJobIds]);
+
+  const corpus = health?.candidates || 0;
+  const totalCandidates = candidates.length;
 
   async function doUpload(files) {
     if (!files?.length) return;
-    setError(''); setUploading(true);
-    const names = {};
-    [...files].forEach(f => { names[null] = f.name; });
+    setError('');
+    setUploading(true);
     try {
       const res = await api.upload(files);
       const ids = [];
@@ -133,25 +179,127 @@ function App() {
       (res.jobs || []).forEach(item => {
         if (item.job_id) { ids.push(item.job_id); namesMap[item.job_id] = item.file_name; }
       });
-      setActiveJobIds(ids);
-      setUploadFileNames(namesMap);
+      setActiveJobIds(prev => [...prev, ...ids]);
+      setUploadFileNames(prev => ({ ...prev, ...namesMap }));
     } catch (e) { setError(e.message); }
     finally { setUploading(false); }
   }
 
-  async function doSearch(e) {
-    e.preventDefault(); if (!query.trim()) return;
-    setError(''); setSearching(true);
-    try { setSearchResult(await api.search(query)); }
-    catch (e) { setError(e.message); }
+  async function doSearch(tokOverride) {
+    const qTokens = tokOverride || tokens;
+    if (!qTokens.length) return;
+    setSearching(true);
+    setError('');
+    try {
+      const res = await api.search(qTokens.join(' '), { mode, minYears, location });
+      setSearchResult(res);
+    } catch (e) { setError(e.message); }
     finally { setSearching(false); }
   }
 
-  const stats = useMemo(() => {
-    const skills = new Set();
-    candidates.forEach(c => (c.skills || []).forEach(s => skills.add(s.toLowerCase())));
-    return { candidates: candidates.length, skills: skills.size, llm: health?.llm_enabled };
-  }, [candidates, health]);
+  // Run when tokens change on Enter or remove
+  const runSearch = useCallback(doSearch, [tokens, mode, minYears, location]);
+
+  function addToken(val) {
+    const v = val.trim();
+    if (!v) return;
+    if (tokens.some(t => t.toLowerCase() === v.toLowerCase())) { setInput(''); return; }
+    const newTokens = [...tokens, v];
+    setTokens(newTokens);
+    setInput('');
+  }
+
+  function removeToken(i) {
+    const newTokens = tokens.filter((_, j) => j !== i);
+    setTokens(newTokens);
+    if (newTokens.length === 0) setSearchResult(null);
+  }
+
+  const suggestionGo = useCallback((term) => () => {
+    setTokens([term]);
+    setInput('');
+  }, []);
+
+  const suggestions = [
+    { label: 'Go', go: suggestionGo('Go') },
+    { label: 'Kubernetes', go: suggestionGo('Kubernetes') },
+    { label: 'Python', go: suggestionGo('Python') },
+    { label: 'NLP', go: suggestionGo('NLP') },
+  ];
+
+  function addReq(val) {
+    const v = val.trim();
+    if (!v) return;
+    if (reqSkills.some(s => s.toLowerCase() === v.toLowerCase())) { setReqInput(''); return; }
+    setReqSkills(prev => [...prev, v]);
+    setReqInput('');
+    setPreRan(false);
+  }
+
+  async function runPrescreen() {
+    if (reqSkills.length === 0) return;
+    setPreRan(true);
+    // Reuse search for each requirement, collect results
+    const allResults = [];
+    for (const skill of reqSkills) {
+      try {
+        const res = await api.search(skill, { mode: 'semantic', minYears: preMinYears, location: 'any' });
+        (res.results || []).forEach(r => {
+          r.candidate._score = r.score;
+          r.candidate._reason = r.reason;
+        });
+        allResults.push(...(res.results || []));
+      } catch {}
+    }
+    // Deduplicate and rank
+    const seen = new Set();
+    const ranked = allResults.filter(r => { if (seen.has(r.candidate.id)) return false; seen.add(r.candidate.id); return true; });
+    setPreResults(ranked);
+  }
+
+  const activeSearchResults = useMemo(() => {
+    if (!searchResult) return { results: [], mode: 'deterministic', corpusSize: 0, searchTime: 0 };
+    return {
+      results: (searchResult.results || []).map((r, i) => {
+        const c = r.candidate;
+        const [avBg, avColor] = avatarPalette(i);
+        const score = Math.min(Math.round(r.score), 99);
+        const scoreColor = score >= 80 ? '#00766f' : score >= 60 ? '#b45309' : '#64748b';
+        const tokenHits = tokens.map(t => {
+          const lower = (c.raw_text || c.summary || '').toLowerCase();
+          return lower.includes(t.toLowerCase()) || (c.skills || []).some(s => s.toLowerCase().includes(t.toLowerCase()));
+        });
+        const coverage = tokens.map((t, j) => ({
+          label: t,
+          icon: tokenHits[j] ? 'check' : 'minus',
+          bg: tokenHits[j] ? '#00766f12' : '#f1f5f9',
+          color: tokenHits[j] ? '#00766f' : '#94a3b8'
+        }));
+        const snippet = snippetAround(c.raw_text || c.summary || `${c.name}: ${c.current_title || ''} ${(c.skills||[]).join(', ')}`, tokens);
+        const inSkills = (c.skills || []).some(s => tokens.some(t => s.toLowerCase().includes(t.toLowerCase()) || t.toLowerCase().includes(s.toLowerCase())));
+        return {
+          ...c,
+          initials: initials(c.name),
+          avBg, avColor, score, scoreColor,
+          coverage, snippet, inSkills,
+          border: inSkills ? '#d7dee8' : '#b4530933',
+          barColor: inSkills ? '#a50034' : '#b45309',
+          why: inSkills ? `Matched in Skills field + CV body` : r.reason || `Found in CV text`,
+          whyIcon: inSkills ? 'file-text' : 'search',
+          score,
+          rawText: c.raw_text || ''
+        };
+      }),
+      mode: searchResult.mode,
+      corpusSize: searchResult.corpus_size || 0,
+      searchTime: searchResult.search_time || 0
+    };
+  }, [searchResult, tokens]);
+
+  const drawerCandidate = useMemo(() => {
+    if (drawerId == null) return null;
+    return candidates.find(c => c.id === drawerId);
+  }, [drawerId, candidates]);
 
   const pendingJobs = activeJobIds.filter(id => {
     const j = jobData[id];
@@ -159,98 +307,370 @@ function App() {
   });
 
   return <div className="app">
-    <header className="hero">
-      <div className="eyebrow"><Sparkles size={16}/> LLM-assisted CV Intelligence Index</div>
-      <h1>Search CVs like a recruiter, grounded by real uploaded documents.</h1>
-      <p>Upload one CV or a batch, extract candidate profiles via background workers, then search with natural language.</p>
-      <div className="stats">
-        <Stat icon={<Users/>} label="Candidates" value={stats.candidates}/>
-        <Stat icon={<FileText/>} label="Detected skills" value={stats.skills}/>
-        <Stat icon={<Sparkles/>} label="LLM rerank" value={stats.llm ? 'Live' : 'Fallback'}/>
-        <Stat icon={<FileText/>} label="Cloud OCR" value={health?.ocr_enabled ? 'Gemini' : 'Off'}/>
-        {pendingJobs.length > 0 && <Stat icon={<Loader2 className="spin"/>} label="Processing" value={pendingJobs.length}/>}
+    {/* TOPBAR */}
+    <div className="topbar">
+      <div className="topbar-left">
+        <div className="topbar-logo"><Box size={18} /></div>
+        <div className="topbar-title">Recruitment</div>
+        <div className="topbar-divider" />
+        <div className="topbar-sub">CV Document Search <span className="badge-poc">POC</span></div>
       </div>
-    </header>
+      <div className="topbar-right">
+        <div className="corpus-badge">
+          <Database size={14} />
+          <span><strong>{corpus}</strong> CVs parsed & indexed</span>
+        </div>
+        <div className="avatar">HR</div>
+      </div>
+    </div>
 
-    {error && <div className="alert"><AlertCircle size={18}/>{error}</div>}
+    {/* TABS */}
+    <div className="tabs">
+      <button className={`tab ${view === 'prescreen' ? 'active' : ''}`} onClick={() => setView('prescreen')}>
+        <ListChecks size={16} /> Prescreening
+      </button>
+      <div className="tab-divider" />
+      <button className={`tab ${view === 'search' ? 'active' : ''}`} onClick={() => setView('search')}>
+        <ScanSearch size={16} /> Search applicants <span className="tab-badge">AD-HOC</span>
+      </button>
+      <div className="tab-spacer" />
+      <div className="tab-context">
+        <Briefcase size={14} />
+        <span className="context-title">All CVs</span>
+        <span className="context-meta">· {totalCandidates} in pipeline</span>
+      </div>
+    </div>
 
-    <main className="grid">
-      <section className="card upload-card">
-        <h2><Upload size={20}/> Add CVs</h2>
-        <p>Singular or batch. Supported: PDF, DOCX, TXT/MD, PNG/JPG/WebP. PDFs/images use Gemini cloud OCR first; text extraction remains as fallback.</p>
-        <label className="drop">
-          <input type="file" multiple accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.webp" onChange={e => doUpload(e.target.files)} />
-          <Upload size={36}/>
-          <strong>{uploading ? 'Queuing CVs…' : 'Drop/click to upload CVs'}</strong>
-          <span>Files are processed asynchronously — watch the status below.</span>
-        </label>
+    {error && <div className="alert"><AlertCircle size={18} />{error}</div>}
 
-        {activeJobIds.length > 0 && <div className="job-list">
-          {activeJobIds.map(id => {
-            const job = jobData[id];
-            if (!job) return <div key={id} className="job-row"><Clock size={16}/><div>{uploadFileNames[id] || id}<span>pending</span></div></div>;
-            const meta = JOB_LABELS[job.status] || JOB_LABELS.queued;
-            const Icon = meta.icon;
-            const isActive = job.status === 'extracting' || job.status === 'indexing';
-            return <div key={id} className={`job-row ${job.status}`}>
-              {isActive ? <Loader2 size={16} className="spin"/> : <Icon size={16} style={{color: meta.color}}/>}
-              <div>
-                <strong>{job.file_name}</strong>
-                <span style={{color: meta.color}}>
-                  {meta.label}
-                  {job.status === 'completed' ? ` — indexed via ${job.mode || 'fallback'}` : ''}
-                  {job.status === 'failed' ? ` — ${job.error}` : ''}
+    {/* UPLOAD BANNER */}
+    <div className="upload-banner">
+      <label className="upload-trigger">
+        <input type="file" multiple accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.webp" onChange={e => doUpload(e.target.files)} />
+        <Upload size={16} />
+        <span>{uploading ? 'Queuing…' : 'Upload CVs'}</span>
+      </label>
+      {pendingJobs.length > 0 && <div className="upload-progress">
+        <Loader2 size={14} className="spin" /> {pendingJobs.length} processing
+      </div>}
+      {activeJobIds.length > 0 && <div className="job-status-compact">
+        {activeJobIds.slice(-3).map(id => {
+          const job = jobData[id];
+          if (!job) return null;
+          const meta = JOB_LABELS[job.status] || JOB_LABELS.queued;
+          const Icon = meta.icon;
+          const active = job.status === 'extracting' || job.status === 'indexing';
+          return <span key={id} className={`job-chip ${job.status}`}>
+            {active ? <Loader2 size={11} className="spin" /> : <Icon size={11} />}
+            {job.file_name}
+          </span>;
+        })}
+      </div>}
+    </div>
+
+    {/* ====== SEARCH VIEW ====== */}
+    {view === 'search' && <div className="view-container">
+      {/* SEARCH CONTROLS */}
+      <div className="search-controls">
+        <div className="search-input-row">
+          <div className={`token-input ${focused ? 'focused' : ''}`}>
+            <Search size={18} className="search-icon" />
+            {tokens.map((t, i) => (
+              <span key={i} className="token-chip">
+                {t}
+                <button className="token-remove" onClick={() => removeToken(i)}><X size={12} /></button>
+              </span>
+            ))}
+            <input
+              value={input} onChange={e => setInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addToken(e.target.value); } else if (e.key === 'Backspace' && !input && tokens.length > 0) { setTokens(tokens.slice(0, -1)); } }}
+              onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
+              placeholder={tokens.length === 0 ? 'Search a skill — e.g. Go, Kubernetes, NLP…' : 'Add another skill…'}
+              className="token-field"
+            />
+          </div>
+          <button className="btn-add-skill" onClick={() => { addToken(input); }}>
+            <Plus size={17} /> Add skill
+          </button>
+        </div>
+        <div className="input-hint">Type a skill and press <strong>Enter</strong> to add it. Add several — candidates are ranked by how many they match.</div>
+
+        {/* FILTERS ROW */}
+        <div className="filters-row">
+          <FilterGroup label="MATCHING">
+            <SegControl
+              options={[
+                { label: 'Exact', value: 'exact' },
+                { label: <><Sparkles size={13} /> Semantic</>, value: 'semantic' }
+              ]}
+              value={mode} onChange={setMode}
+            />
+          </FilterGroup>
+          <FilterGroup label="EXPERIENCE">
+            <SegControl
+              options={[
+                { label: 'Any', value: 0 },
+                { label: '3+ yrs', value: 3 },
+                { label: '5+ yrs', value: 5 }
+              ]}
+              value={minYears} onChange={setMinYears}
+            />
+          </FilterGroup>
+          <FilterGroup label="LOCATION">
+            <select value={location} onChange={e => setLocation(e.target.value)} className="select-filter">
+              <option value="any">Anywhere</option>
+              <option value="Jakarta">Jakarta</option>
+              <option value="Bandung">Bandung</option>
+              <option value="Surabaya">Surabaya</option>
+              <option value="Singapore">Singapore</option>
+              <option value="Remote">Remote</option>
+            </select>
+          </FilterGroup>
+        </div>
+
+        {/* SEMANTIC EXPANSION + SUGGESTIONS */}
+        <div className="semantic-row">
+          {mode === 'semantic' && tokens.length > 0 && (
+            <div className="semantic-banner">
+              <GitBranch size={14} />
+              <span>Semantic search also looks for related skills — catching candidates who described the skill differently.</span>
+            </div>
+          )}
+          <div className="try-section">
+            <span className="try-label">TRY</span>
+            {suggestions.map(s => (
+              <button key={s.label} className="try-pill" onClick={s.go}>{s.label}</button>
+            ))}
+            <button className="try-pill try-search" onClick={() => runSearch()}>
+              {searching ? <Loader2 size={12} className="spin" /> : <ScanSearch size={12} />}
+              Search
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* RESULTS */}
+      {tokens.length > 0 && <div className="results-header">
+        <div className="results-label">{activeSearchResults.results.length} CANDIDATE{activeSearchResults.results.length === 1 ? '' : 'S'} MATCHED</div>
+        {activeSearchResults.results.length > 0 && (
+          <div className="results-meta">
+            <Database size={13} /> Scanned <strong>{activeSearchResults.corpusSize}</strong> parsed CVs
+            <span className="meta-dot">·</span>
+            <Zap size={13} className="zap-icon" /> {activeSearchResults.searchTime.toFixed(2)}s
+          </div>
+        )}
+        <div className="results-spacer" />
+        {activeSearchResults.results.length > 0 && (
+          <div className="results-sort"><ArrowDownWideNarrow size={13} /> Ranked by relevance</div>
+        )}
+      </div>}
+
+      <div className="results-container">
+        {tokens.length === 0 && !searchResult && (
+          <div className="empty-state">
+            <FileSearch2 size={34} />
+            <div className="empty-title">Add a skill to search across every CV</div>
+            <div className="empty-desc">Semantic search scans the full text of <strong>{corpus}</strong> parsed CVs — not just the Skills field — so you catch candidates who described it in their own words.</div>
+          </div>
+        )}
+        {tokens.length > 0 && activeSearchResults.results.length === 0 && !searching && (
+          <div className="empty-state">
+            <SearchX size={30} />
+            <div className="empty-title">No CVs matched your criteria</div>
+            <div className="empty-desc">Try Semantic matching, loosen the filters, or add more CVs.</div>
+          </div>
+        )}
+        {searching && <div className="searching-indicator"><Loader2 size={20} className="spin" /> Searching…</div>}
+        <div className="results-list">
+          {activeSearchResults.results.map((r, idx) => (
+            <div key={r.id} className="result-card" onClick={() => setDrawerId(r.id)} style={{ borderColor: r.border }}>
+              <div className="card-left">
+                <div className="card-avatar" style={{ background: r.avBg, color: r.avColor }}>{r.initials}</div>
+              </div>
+              <div className="card-body">
+                <div className="card-head">
+                  <div className="card-name">{r.name}</div>
+                  <div className="card-meta">{r.current_title || r.file_name}{r.years_experience ? ` · ${r.years_experience} yrs` : ''}{r.locations && r.locations[0] ? ` · ${r.locations[0]}` : ''}</div>
+                </div>
+                {/* Coverage chips */}
+                <div className="coverage-row">
+                  {r.coverage.map((c, i) => (
+                    <span key={i} className="coverage-chip" style={{ background: c.bg, color: c.color }}>
+                      {c.icon === 'check' ? <Check size={11} /> : <Minus size={11} />}
+                      {c.label}
+                    </span>
+                  ))}
+                </div>
+                {/* Evidence snippet */}
+                {r.snippet && r.snippet.count > 0 && (
+                  <div className="evidence-box" style={{ borderLeftColor: r.barColor }}>
+                    <div className="evidence-label">
+                      {r.whyIcon === 'file-text' ? <FileIcon size={12} /> : <Search size={12} />}
+                      {r.why}
+                    </div>
+                    <div className="evidence-text" dangerouslySetInnerHTML={{ __html: r.snippet.html }} />
+                  </div>
+                )}
+              </div>
+              <div className="card-right">
+                <div className="score-area">
+                  <div className="score-value" style={{ color: r.scoreColor }}>{r.score}</div>
+                  <div className="score-unit">%</div>
+                </div>
+                <div className="score-label">RELEVANCE</div>
+                <div className="card-open"><ArrowRight size={13} /></div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>}
+
+    {/* ====== PRESCREEN VIEW ====== */}
+    {view === 'prescreen' && <div className="view-container">
+      <div className="criteria-card">
+        <div className="criteria-header">
+          <ListChecks size={18} />
+          <span className="criteria-title">Screening criteria</span>
+          <span className="criteria-meta">— auto-screen all {corpus} parsed CVs against these</span>
+        </div>
+        <div className="criteria-grid">
+          <div>
+            <div className="criteria-label">REQUIRED SKILLS</div>
+            <div className="req-skills-row">
+              {reqSkills.map((s, i) => (
+                <span key={i} className="token-chip">
+                  {s}
+                  <button className="token-remove" onClick={() => { setReqSkills(reqSkills.filter((_, j) => j !== i)); setPreRan(false); }}>
+                    <X size={12} />
+                  </button>
                 </span>
+              ))}
+              <input value={reqInput} onChange={e => setReqInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addReq(e.target.value); } }}
+                placeholder="+ add requirement…" className="req-input" />
+            </div>
+          </div>
+          <div>
+            <div className="criteria-label">MIN. EXPERIENCE</div>
+            <div className="seg-control">
+              <button className={`seg-btn ${preMinYears === 3 ? 'active' : ''}`} onClick={() => { setPreMinYears(3); setPreRan(false); }}>3+ yrs</button>
+              <button className={`seg-btn ${preMinYears === 5 ? 'active' : ''}`} onClick={() => { setPreMinYears(5); setPreRan(false); }}>5+ yrs</button>
+            </div>
+          </div>
+        </div>
+        <div className="criteria-actions">
+          <button className="btn-primary" onClick={runPrescreen} disabled={reqSkills.length === 0}>
+            <Play size={16} /> Run prescreening
+          </button>
+          {preRan && (
+            <div className="criteria-stats">
+              <Database size={14} /> Pre-screened <strong>{corpus}</strong> CVs against {reqSkills.length + 1} requirements
+            </div>
+          )}
+        </div>
+      </div>
+
+      {preRan && <div className="pre-results">
+        <div className="pre-header">
+          <div className="results-label">RANKED CANDIDATES · {preResults.length} SHOWN</div>
+          <div className="results-meta">sorted by requirements met, then fit score</div>
+        </div>
+        <div className="results-list">
+          {preResults.map((r, i) => {
+            const c = r.candidate;
+            const [avBg, avColor] = avatarPalette(i);
+            return <div key={c.id} className="result-card" onClick={() => setDrawerId(c.id)}>
+              <div className="card-left">
+                <div className="card-avatar" style={{ background: avBg, color: avColor }}>{initials(c.name)}</div>
+              </div>
+              <div className="card-body">
+                <div className="card-head">
+                  <div className="card-name">{c.name}</div>
+                  <div className="card-meta">{c.current_title || c.file_name}{c.years_experience ? ` · ${c.years_experience} yrs` : ''}{c.locations && c.locations[0] ? ` · ${c.locations[0]}` : ''}</div>
+                </div>
+                <div className="requirement-chips">
+                  {reqSkills.map((s, j) => {
+                    const has = (c.skills || []).some(sk => sk.toLowerCase().includes(s.toLowerCase()));
+                    return <span key={j} className={`req-chip ${has ? 'pass' : 'fail'}`}>
+                      {has ? <Check size={12} /> : <X size={12} />} {s}
+                    </span>;
+                  })}
+                  <span className={`req-chip ${(c.years_experience || 0) >= preMinYears ? 'pass' : 'fail'}`}>
+                    {(c.years_experience || 0) >= preMinYears ? <Check size={12} /> : <X size={12} />} {preMinYears}+ yrs
+                  </span>
+                </div>
+              </div>
+              <div className="card-right">
+                <div className="card-pass">{reqSkills.filter(s => (c.skills||[]).some(sk => sk.toLowerCase().includes(s.toLowerCase()))).length + ((c.years_experience||0) >= preMinYears ? 1 : 0)}/{reqSkills.length + 1}</div>
+                <div className="card-open"><ArrowRight size={13} /></div>
               </div>
             </div>;
           })}
+        </div>
+        {preResults.length === 0 && <div className="empty-state">
+          <ListChecks size={30} />
+          <div className="empty-title">No candidates matched your requirements</div>
+          <div className="empty-desc">Try loosening the criteria or adding more CVs.</div>
         </div>}
-      </section>
+      </div>}
+    </div>}
 
-      <section className="card search-card">
-        <h2><Search size={20}/> Search candidates</h2>
-        <form onSubmit={doSearch} className="search-form">
-          <textarea value={query} onChange={e => setQuery(e.target.value)} placeholder="Find backend engineers with Go, Kafka, fintech experience, open to remote…" />
-          <button disabled={searching || pendingJobs.length > 0}>{searching ? 'Searching…' : 'Search'}</button>
-        </form>
-        {searchResult && <div className="results">
-          <div className="mode">Mode: {searchResult.mode}</div>
-          {(searchResult.results || []).length === 0 && <p className="muted">No matches yet. Upload CVs or broaden the query.</p>}
-          {pendingJobs.length > 0 && <p className="muted"><Loader2 size={14} className="spin"/> {pendingJobs.length} CV{(pendingJobs.length===1)?'':'s'} still processing — indexing isn't complete yet.</p>}
-          {(searchResult.results || []).map(r => <CandidateCard key={r.candidate.id} candidate={r.candidate} score={r.score} reason={r.reason}/>)}
-        </div>}
-      </section>
-    </main>
-
-    <section className="card full">
-      <h2>Indexed candidates</h2>
-      {candidates.length === 0 ?
-        <p className="muted">No CVs indexed yet. Upload a sample TXT/PDF/DOCX to test the flow.</p> :
-        <div className="candidate-list">{candidates.map(c => <CandidateCard key={c.id} candidate={c}/>)}</div>}
-    </section>
+    {/* CV DRAWER */}
+    {drawerId && drawerCandidate && (
+      <>
+        <div className="drawer-overlay" onClick={() => setDrawerId(null)} />
+        <div className="drawer">
+          <div className="drawer-head">
+            <div className="card-avatar" style={avatarPalette(drawerCandidate.id ? drawerCandidate.id.length : 0)}>
+              {initials(drawerCandidate.name)}
+            </div>
+            <div className="drawer-info">
+              <div className="drawer-name">{drawerCandidate.name}</div>
+              <div className="card-meta">{drawerCandidate.current_title}{drawerCandidate.years_experience ? ` · ${drawerCandidate.years_experience} yrs` : ''}{drawerCandidate.locations && drawerCandidate.locations[0] ? ` · ${drawerCandidate.locations[0]}` : ''}</div>
+            </div>
+            <button className="drawer-close" onClick={() => setDrawerId(null)}><X size={17} /></button>
+          </div>
+          <div className="drawer-body">
+            <div className="ai-summary">
+              <Sparkles size={14} />
+              <span className="ai-label">AI SUMMARY</span>
+              <span className="ai-badge">Generated · not part of the submitted CV</span>
+            </div>
+            <div className="ai-text">{drawerCandidate.summary || 'No AI summary available.'}</div>
+            <div className="drawer-cv">
+              <div className="cv-path"><FileIcon size={12} /> {drawerCandidate.file_name}</div>
+              <div className="cv-header">SUBMITTED CV · FULL TEXT</div>
+              {drawerCandidate.raw_text ? <div className="cv-text">{drawerCandidate.raw_text}</div> : <div className="cv-placeholder">Raw CV text not available.</div>}
+            </div>
+          </div>
+          <div className="drawer-footer">
+            <button className="btn-primary"><UserCheck size={16} /> Shortlist candidate</button>
+            <button className="btn-secondary"><Download size={16} /> Download CV</button>
+          </div>
+        </div>
+      </>
+    )}
   </div>;
 }
 
-function Stat({ icon, label, value }) {
-  return <div className="stat">{React.cloneElement(icon, {size: 20})}<div><strong>{value}</strong><span>{label}</span></div></div>;
+function FilterGroup({ label, children }) {
+  return <div className="filter-group">
+    <span className="filter-label">{label}</span>
+    {children}
+  </div>;
 }
 
-function CandidateCard({ candidate: c, score, reason }) {
-  return <article className="candidate">
-    <div className="candidate-head">
-      <div><h3>{c.name}</h3><p>{c.current_title || c.file_name}</p></div>
-      {score !== undefined && <div className="score">{Math.round(score)}</div>}
-    </div>
-    <p className="summary">{c.summary || 'No summary extracted.'}</p>
-    {reason && <p className="reason"><Sparkles size={14}/>{reason}</p>}
-    <div className="chips">{(c.skills || []).slice(0, 12).map(s => <span key={s}>{s}</span>)}</div>
-    <div className="meta">
-      {c.years_experience ? <span>{c.years_experience}+ yrs</span> : null}
-      {c.seniority ? <span>{c.seniority}</span> : null}
-      {(c.locations || []).slice(0,3).map(l => <span key={l}>{l}</span>)}
-      {c.email ? <span>{c.email}</span> : null}
-    </div>
-  </article>;
+function SegControl({ options, value, onChange }) {
+  return <div className="seg-control">
+    {options.map(opt => (
+      <button key={opt.value}
+        className={`seg-btn ${value === opt.value ? 'active' : ''}`}
+        onClick={() => onChange(opt.value)}>
+        {opt.label}
+      </button>
+    ))}
+  </div>;
 }
 
 createRoot(document.getElementById('root')).render(<App />);

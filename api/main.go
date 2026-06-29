@@ -807,7 +807,11 @@ func (s *Server) getJobs(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Query string `json:"query"`
+		Query    string `json:"query"`
+		Mode     string `json:"mode"`
+		MinYears int    `json:"min_years"`
+		Location string `json:"location"`
+		Scope    string `json:"scope"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -818,12 +822,38 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "query is required", http.StatusBadRequest)
 		return
 	}
-	results := deterministicSearch(req.Query, s.store.AllCandidates())
-	mode := "deterministic"
-	if len(results) > 12 {
-		results = results[:12]
+
+	start := time.Now()
+	candidates := s.store.AllCandidates()
+	corpusSize := len(candidates)
+
+	// Apply filters
+	filtered := []Candidate{}
+	for _, c := range candidates {
+		if req.MinYears > 0 && c.YearsExperience < req.MinYears {
+			continue
+		}
+		if req.Location != "" && req.Location != "any" {
+			hasLoc := false
+			for _, l := range c.Locations {
+				if strings.EqualFold(l, req.Location) {
+					hasLoc = true
+					break
+				}
+			}
+			if strings.Contains(strings.ToLower(c.Name), strings.ToLower(req.Location)) || strings.Contains(strings.ToLower(c.CurrentTitle), strings.ToLower(req.Location)) || strings.Contains(strings.ToLower(c.Summary), strings.ToLower(req.Location)) || strings.Contains(strings.ToLower(c.RawText), strings.ToLower(req.Location)) {
+				hasLoc = true
+			}
+			if !hasLoc {
+				continue
+			}
+		}
+		filtered = append(filtered, c)
 	}
-	if s.llm.Enabled() {
+
+	results := deterministicSearch(req.Query, filtered)
+	mode := "deterministic"
+	if req.Mode == "semantic" && s.llm.Enabled() {
 		if reranked, err := s.llm.Rerank(r.Context(), req.Query, results); err == nil {
 			results = reranked
 			mode = "llm-rerank"
@@ -831,10 +861,12 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 			log.Printf("LLM rerank failed: %v", err)
 		}
 	}
+	elapsed := time.Since(start).Seconds()
 	for i := range results {
 		results[i].Candidate.RawText = ""
 	}
-	writeJSON(w, map[string]any{"query": req.Query, "mode": mode, "results": results})
+	writeJSON(w, map[string]any{"query": req.Query, "mode": mode, "results": results,
+		"corpus_size": corpusSize, "search_time": elapsed})
 }
 
 func deterministicSearch(query string, candidates []Candidate) []SearchResult {
