@@ -42,6 +42,20 @@ const api = {
     const res = await fetch(`/api/candidates/${id}`, { method: 'DELETE' });
     if (!res.ok) throw new Error(await res.text());
     return res.json();
+  },
+  async jobMatch(jobDescription, opts = {}) {
+    const res = await fetch('/api/job-match', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        job_description: jobDescription,
+        top_k: opts.topK || 5,
+        min_years: opts.minYears || 0,
+        location: opts.location || 'any',
+      })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
   }
 };
 
@@ -155,6 +169,14 @@ function App() {
   const [preRan, setPreRan] = useState(false);
   const [preResults, setPreResults] = useState([]);
 
+  // Job description matching state
+  const [jobDescription, setJobDescription] = useState('');
+  const [jobTopK, setJobTopK] = useState(5);
+  const [jobMinYears, setJobMinYears] = useState(0);
+  const [jobLocation, setJobLocation] = useState('any');
+  const [jobMatching, setJobMatching] = useState(false);
+  const [jobMatchResult, setJobMatchResult] = useState(null);
+
   const jobData = useJobPolling(activeJobIds);
 
   async function refresh() {
@@ -262,6 +284,17 @@ function App() {
     setPreResults(ranked);
   }
 
+  async function runJobMatch() {
+    if (!jobDescription.trim()) return;
+    setJobMatching(true);
+    setError('');
+    try {
+      const res = await api.jobMatch(jobDescription, { topK: jobTopK, minYears: jobMinYears, location: jobLocation });
+      setJobMatchResult(res);
+    } catch (e) { setError(e.message); }
+    finally { setJobMatching(false); }
+  }
+
   const activeSearchResults = useMemo(() => {
     if (!searchResult) return { results: [], mode: 'deterministic', corpusSize: 0, searchTime: 0 };
     return {
@@ -337,6 +370,10 @@ function App() {
       <div className="tab-divider" />
       <button className={`tab ${view === 'prescreen' ? 'active' : ''}`} onClick={() => setView('prescreen')}>
         <ListChecks size={16} /> Prescreening
+      </button>
+      <div className="tab-divider" />
+      <button className={`tab ${view === 'job-match' ? 'active' : ''}`} onClick={() => setView('job-match')}>
+        <Briefcase size={16} /> Job Match <span className="tab-badge">TOP {jobTopK}</span>
       </button>
       <div className="tab-divider" />
       <button className={`tab ${view === 'search' ? 'active' : ''}`} onClick={() => setView('search')}>
@@ -529,6 +566,109 @@ function App() {
               </div>
             </div>
           ))}
+        </div>
+      </div>
+    </div>}
+
+    {/* ====== JOB DESCRIPTION MATCH VIEW ====== */}
+    {view === 'job-match' && <div className="view-container">
+      <div className="job-match-panel">
+        <div className="criteria-header">
+          <Briefcase size={18} />
+          <span className="criteria-title">Job description matching</span>
+          <span className="criteria-meta">— LLM hunts for the best candidates in the CV DB</span>
+        </div>
+        <textarea
+          className="jd-textarea"
+          value={jobDescription}
+          onChange={e => setJobDescription(e.target.value)}
+          placeholder={`Paste a job description here…\n\nExample: Senior backend engineer with Go, Kubernetes, Kafka, PostgreSQL, payments/fintech experience. Must design APIs and mentor engineers.`}
+        />
+        <div className="jd-controls">
+          <FilterGroup label="TOP CANDIDATES">
+            <input type="number" min="1" max="25" value={jobTopK}
+              onChange={e => setJobTopK(Math.max(1, Math.min(25, Number(e.target.value) || 5)))}
+              className="topk-input" />
+          </FilterGroup>
+          <FilterGroup label="MIN. EXPERIENCE">
+            <div className="exp-slider-wrap">
+              <input type="range" min="0" max="15" value={jobMinYears}
+                onChange={e => setJobMinYears(Number(e.target.value))}
+                className="exp-slider" />
+              <span className="exp-slider-value">{jobMinYears === 0 ? 'Any' : `${jobMinYears}+ yrs`}</span>
+            </div>
+          </FilterGroup>
+          <FilterGroup label="LOCATION">
+            <select value={jobLocation} onChange={e => setJobLocation(e.target.value)} className="select-filter">
+              <option value="any">Anywhere</option>
+              <option value="Jakarta">Jakarta</option>
+              <option value="Bandung">Bandung</option>
+              <option value="Surabaya">Surabaya</option>
+              <option value="Singapore">Singapore</option>
+              <option value="Remote">Remote</option>
+              <option value="India">India</option>
+              <option value="United States">United States</option>
+            </select>
+          </FilterGroup>
+          <button className="btn-primary" onClick={runJobMatch} disabled={jobMatching || !jobDescription.trim()}>
+            {jobMatching ? <Loader2 size={16} className="spin" /> : <Sparkles size={16} />}
+            Find candidates
+          </button>
+        </div>
+      </div>
+
+      {jobMatchResult && <div className="results-header">
+        <div className="results-label">TOP {jobMatchResult.results?.length || 0} JOB MATCHES</div>
+        <div className="results-meta">
+          <Database size={13} /> Scanned <strong>{jobMatchResult.corpus_size}</strong> parsed CVs
+          <span className="meta-dot">·</span>
+          Pool <strong>{jobMatchResult.candidate_pool}</strong>
+          <span className="meta-dot">·</span>
+          <Zap size={13} className="zap-icon" /> {Number(jobMatchResult.search_time || 0).toFixed(2)}s
+          <span className="meta-dot">·</span>
+          {jobMatchResult.mode}
+        </div>
+      </div>}
+
+      <div className="results-container">
+        {!jobMatchResult && <div className="empty-state">
+          <Briefcase size={34} />
+          <div className="empty-title">Paste a JD and let the LLM shortlist candidates</div>
+          <div className="empty-desc">Default is top 5, but you can configure the shortlist size and apply experience/location filters before matching.</div>
+        </div>}
+        {jobMatchResult && (jobMatchResult.results || []).length === 0 && <div className="empty-state">
+          <SearchX size={30} />
+          <div className="empty-title">No candidates matched this job description</div>
+          <div className="empty-desc">Try loosening filters or seeding more IT CV PDFs.</div>
+        </div>}
+        <div className="results-list">
+          {(jobMatchResult?.results || []).map((r, idx) => {
+            const c = r.candidate;
+            const [avBg, avColor] = avatarPalette(idx);
+            const score = Math.min(Math.round(r.score || 0), 99);
+            const scoreColor = score >= 80 ? '#00766f' : score >= 60 ? '#b45309' : '#64748b';
+            return <div key={c.id} className="result-card" onClick={() => setDrawerId(c.id)}>
+              <div className="card-left"><div className="card-avatar" style={{ background: avBg, color: avColor }}>{initials(c.name)}</div></div>
+              <div className="card-body">
+                <div className="card-head">
+                  <div className="card-name">{c.name}</div>
+                  <div className="card-meta">{c.current_title || c.file_name}{c.years_experience ? ` · ${c.years_experience} yrs` : ''}{c.locations && c.locations[0] ? ` · ${c.locations[0]}` : ''}</div>
+                </div>
+                <div className="coverage-row">
+                  {(c.skills || []).slice(0, 8).map((s, i) => <span key={i} className="coverage-chip" style={{ background: '#00766f12', color: '#00766f' }}><Check size={11} />{s}</span>)}
+                </div>
+                <div className="evidence-box" style={{ borderLeftColor: '#7c3aed' }}>
+                  <div className="evidence-label"><Sparkles size={12} />WHY THIS MATCH</div>
+                  <div className="evidence-text">{r.reason || c.summary || 'Matched against the job description.'}</div>
+                </div>
+              </div>
+              <div className="card-right">
+                <div className="score-area"><div className="score-value" style={{ color: scoreColor }}>{score}</div><div className="score-unit">%</div></div>
+                <div className="score-label">FIT</div>
+                <div className="card-open"><ArrowRight size={13} /></div>
+              </div>
+            </div>;
+          })}
         </div>
       </div>
     </div>}

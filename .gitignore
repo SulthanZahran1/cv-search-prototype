@@ -9,3 +9,4 @@ data/uploads/*
 !.gitkeep
 .DS_Store
 web/public/download/
+sample-cvs/hf-it-pdfs/

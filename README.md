@@ -10,7 +10,9 @@ LLM-assisted CV upload, extraction, indexing, and recruiter search prototype bui
 - Gemini multimodal OCR/extraction for PDFs/images
 - Candidate profile extraction with DeepSeek/OpenAI-compatible fallback
 - Natural-language recruiter search
+- Job-description matching view: paste a JD and LLM hunts for configurable top-K candidates (default 5)
 - Hybrid deterministic retrieval + optional LLM reranking/explanations
+- PDF dataset seeding script for real IT resumes from Hugging Face `opensporks/resumes`
 - Self-contained Go server serving the React UI and API
 
 ## Quick Start
@@ -49,7 +51,19 @@ LLM_MODEL=openai/gpt-4o-mini
 - `GET /api/health`
 - `POST /api/upload` with multipart field `files`
 - `GET /api/candidates`
-- `POST /api/search` with `{ "query": "backend engineer with Go and Kafka" }`
+- `DELETE /api/candidates/{id}`
+- `POST /api/search` with `{ "query": "backend engineer with Go and Kafka", "mode": "semantic", "min_years": 3 }`
+- `POST /api/job-match` with `{ "job_description": "...", "top_k": 5, "min_years": 0, "location": "any" }`
+
+## PDF Dataset Seeding
+
+Seed real IT resume PDFs from Hugging Face `opensporks/resumes` (category `INFORMATION-TECHNOLOGY`) through the normal upload endpoint:
+
+```bash
+python3 scripts/seed_hf_it_pdfs.py --limit 24 --api http://localhost:8095
+```
+
+This intentionally uploads `.pdf` files so the worker exercises the document extraction path. PDFs are attempted with Gemini first; if Gemini is quota-limited/unavailable, the app falls back to `pdftotext` + DeepSeek extraction so the demo remains usable.
 
 ## Architecture
 
@@ -58,7 +72,7 @@ React UI
   ↓
 Go API + async worker queue
   ↓
-Gemini multimodal OCR for PDFs/images OR local text extraction for DOCX/TXT
+Gemini-first document extraction for PDFs/images (pdftotext fallback for PDFs, local extraction for DOCX/TXT)
   ↓
 Structured candidate profile (Gemini / DeepSeek / deterministic fallback)
   ↓

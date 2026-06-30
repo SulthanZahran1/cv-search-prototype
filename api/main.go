@@ -246,19 +246,22 @@ func (jq *JobQueue) process(ctx context.Context, jobID string) {
 		return
 	}
 
-	// Cloud multimodal OCR/extraction first for PDFs and images. This avoids silent
-	// pdftotext failure on scanned PDFs and preserves visual/layout cues better
-	// than OCR -> text -> LLM for modern CV designs.
+	// Gemini-first for PDFs/images so the demo exercises multimodal PDF reading.
+	// PDFs fall back to local pdftotext if Gemini is unavailable/quota-limited;
+	// image CVs fail clearly because there is no local OCR path.
 	mode := "fallback"
 	var c Candidate
 	if jq.gemini != nil && jq.gemini.Enabled() && isGeminiDocument(job.FileName) {
 		if got, err := jq.gemini.ExtractProfileFromDocument(ctx, job.FileName, raw); err == nil {
 			c = got
-			mode = "gemini-ocr"
+			mode = "gemini-pdf"
+			if isImageFile(job.FileName) {
+				mode = "gemini-ocr"
+			}
 			text = candidateSearchText(c)
 			goto indexCandidate
 		} else {
-			log.Printf("Gemini OCR extraction failed for %s: %v; falling back to text extraction", job.FileName, err)
+			log.Printf("Gemini document extraction failed for %s: %v; falling back when possible", job.FileName, err)
 			if isImageFile(job.FileName) {
 				jq.store.UpdateJob(jobID, func(j *Job) {
 					j.Status = JobFailed
@@ -270,17 +273,18 @@ func (jq *JobQueue) process(ctx context.Context, jobID string) {
 	}
 
 	if strings.HasSuffix(strings.ToLower(job.FileName), ".pdf") {
-		// Write to temp file for pdftotext
+		// Fallback: write to temp file for pdftotext.
 		tmpPdf := stored + ".pdf"
 		os.WriteFile(tmpPdf, raw, 0o644)
 		cmd := exec.Command("pdftotext", "-layout", tmpPdf, "-")
 		b, err := cmd.Output()
 		os.Remove(tmpPdf)
 		if err != nil {
-			jq.store.UpdateJob(jobID, func(j *Job) { j.Status = JobFailed; j.Error = fmt.Sprintf("pdftotext: %v", err) })
+			jq.store.UpdateJob(jobID, func(j *Job) { j.Status = JobFailed; j.Error = fmt.Sprintf("gemini failed and pdftotext failed: %v", err) })
 			return
 		}
 		text = string(b)
+		mode = "pdftotext-fallback"
 	} else if strings.HasSuffix(strings.ToLower(job.FileName), ".docx") {
 		// Write to temp file
 		tmpDocx := stored + ".docx"
@@ -689,6 +693,7 @@ func main() {
 	mux.HandleFunc("POST /api/upload", s.upload)
 	mux.HandleFunc("GET /api/jobs", s.getJobs)
 	mux.HandleFunc("POST /api/search", s.search)
+	mux.HandleFunc("POST /api/job-match", s.jobMatch)
 	mux.HandleFunc("/", serveSPA("web/dist"))
 
 	log.Printf("CV Search Prototype listening on :%s (LLM enabled: %v, Gemini OCR enabled: %v)", port, s.llm.Enabled(), s.gemini.Enabled())
@@ -908,6 +913,86 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 		"corpus_size": corpusSize, "search_time": elapsed})
 }
 
+func (s *Server) jobMatch(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		JobDescription string `json:"job_description"`
+		TopK           int    `json:"top_k"`
+		MinYears       int    `json:"min_years"`
+		Location       string `json:"location"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	req.JobDescription = strings.TrimSpace(req.JobDescription)
+	if req.JobDescription == "" {
+		http.Error(w, "job_description is required", http.StatusBadRequest)
+		return
+	}
+	if req.TopK <= 0 {
+		req.TopK = 5
+	}
+	if req.TopK > 25 {
+		req.TopK = 25
+	}
+
+	start := time.Now()
+	candidates := s.store.AllCandidates()
+	corpusSize := len(candidates)
+	filtered := []Candidate{}
+	for _, c := range candidates {
+		if req.MinYears > 0 && c.YearsExperience < req.MinYears {
+			continue
+		}
+		if req.Location != "" && req.Location != "any" {
+			hasLoc := false
+			for _, l := range c.Locations {
+				if strings.EqualFold(l, req.Location) {
+					hasLoc = true
+					break
+				}
+			}
+			if strings.Contains(strings.ToLower(c.RawText), strings.ToLower(req.Location)) || strings.Contains(strings.ToLower(c.Summary), strings.ToLower(req.Location)) {
+				hasLoc = true
+			}
+			if !hasLoc {
+				continue
+			}
+		}
+		filtered = append(filtered, c)
+	}
+
+	// First pass: deterministic lexical retrieval. If the JD is too abstract and
+	// returns no hits, send all filtered candidates to the LLM as the candidate pool.
+	results := deterministicSearch(req.JobDescription, filtered)
+	if len(results) == 0 {
+		for _, c := range filtered {
+			results = append(results, SearchResult{Candidate: c, Score: 1, Reason: "Candidate included for LLM JD matching."})
+		}
+	}
+	mode := "deterministic-jd"
+	if s.llm.Enabled() && len(results) > 0 {
+		jdQuery := "Match candidates to this job description. Prioritize must-have skills, role seniority, domain fit, project evidence, and location only when stated. Job description:\n" + req.JobDescription
+		if reranked, err := s.llm.Rerank(r.Context(), jdQuery, results); err == nil {
+			results = reranked
+			mode = "llm-jd-match"
+		} else {
+			log.Printf("LLM JD match failed: %v", err)
+		}
+	}
+	if len(results) > req.TopK {
+		results = results[:req.TopK]
+	}
+	for i := range results {
+		results[i].Candidate.RawText = ""
+	}
+	elapsed := time.Since(start).Seconds()
+	writeJSON(w, map[string]any{
+		"mode": mode, "top_k": req.TopK, "results": results,
+		"corpus_size": corpusSize, "candidate_pool": len(filtered), "search_time": elapsed,
+	})
+}
+
 func deterministicSearch(query string, candidates []Candidate) []SearchResult {
 	qTokens := tokenize(query)
 	qSet := map[string]bool{}
@@ -1123,8 +1208,13 @@ func cleanCandidate(c *Candidate) {
 	c.Skills = unique(c.Skills)
 	c.Domains = unique(c.Domains)
 	c.Locations = unique(c.Locations)
-	if c.Name == "" {
-		c.Name = "Unknown Candidate"
+	if c.Name == "" || strings.EqualFold(c.Name, "Unknown Candidate") {
+		base := strings.TrimSuffix(filepath.Base(c.FileName), filepath.Ext(c.FileName))
+		if base != "" && base != "." {
+			c.Name = "Candidate " + base
+		} else {
+			c.Name = "Unknown Candidate"
+		}
 	}
 }
 func tokenize(s string) []string {

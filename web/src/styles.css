@@ -192,6 +192,14 @@ body{background:var(--bg);font-family:var(--font);color:var(--text);font-size:14
   .criteria-card{margin:12px}
 }
 
+/* JOB MATCH VIEW */
+.job-match-panel{max-width:1180px;width:calc(100% - 44px);margin:22px auto 0;background:#fff;border:1px solid var(--border);border-radius:12px;padding:20px 22px;box-shadow:0 1px 2px rgba(15,23,42,.04)}
+.jd-textarea{width:100%;min-height:170px;margin-top:14px;resize:vertical;border:1.5px solid var(--border);border-radius:10px;padding:14px 16px;font-family:var(--font);font-size:14px;line-height:1.65;color:var(--text);outline:0;background:#fff}
+.jd-textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(165,0,52,.12)}
+.jd-textarea::placeholder{color:#94a3b8}
+.jd-controls{display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-top:14px;padding-top:14px;border-top:1px solid #eef2f7}
+.topk-input{width:64px;border:1px solid var(--border);border-radius:8px;padding:7px 9px;font-family:var(--font);font-size:13px;font-weight:700;color:var(--gray)}
+
 /* EXPERIENCE SLIDER */
 .exp-slider-wrap{display:flex;align-items:center;gap:9px}
 .exp-slider{-webkit-appearance:none;appearance:none;width:110px;height:4px;border-radius:4px;background:#e2e8f0;outline:0;cursor:pointer}
