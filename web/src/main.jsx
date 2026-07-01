@@ -3,6 +3,19 @@ import { createRoot } from 'react-dom/client';
 import { Upload, Search, FileText, Sparkles, Users, AlertCircle, CheckCircle2, Clock, Loader2, XCircle, X, Plus, Database, Zap, ArrowDownWideNarrow, Quote, GitBranch, Check, Minus, FileSearch2, ScanSearch, SearchX, ListChecks, FileText as FileIcon, Briefcase, ArrowRight, UserCheck, Download, ChevronDown, Play, Box } from 'lucide-react';
 import './styles.css';
 
+const TOKEN_KEY = 'cv_search_token';
+
+function getToken() {
+  return localStorage.getItem(TOKEN_KEY) || '';
+}
+
+function authHeaders(extra = {}) {
+  const token = getToken();
+  const h = { ...extra };
+  if (token) h['Authorization'] = `Bearer ${token}`;
+  return h;
+}
+
 const api = {
   async health() { return fetch('/api/health').then(r => r.json()); },
   async candidates() { return fetch('/api/candidates').then(r => r.json()); },
@@ -27,7 +40,7 @@ const api = {
   async search(query, opts = {}) {
     const res = await fetch('/api/search', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         query,
         mode: opts.mode || 'exact',
@@ -35,6 +48,12 @@ const api = {
         location: opts.location || 'any',
       })
     });
+    if (res.status === 401) throw new Error('Unauthorized: invalid or missing access token');
+    if (res.status === 429) {
+      const body = await res.json().catch(() => ({}));
+      const wait = body.retry_after ? ` — retry in ${body.retry_after}s` : '';
+      throw new Error(`Rate limited${wait}`);
+    }
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },
@@ -46,7 +65,7 @@ const api = {
   async jobMatch(jobDescription, opts = {}) {
     const res = await fetch('/api/job-match', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         job_description: jobDescription,
         top_k: opts.topK || 5,
@@ -54,6 +73,12 @@ const api = {
         location: opts.location || 'any',
       })
     });
+    if (res.status === 401) throw new Error('Unauthorized: invalid or missing access token');
+    if (res.status === 429) {
+      const body = await res.json().catch(() => ({}));
+      const wait = body.retry_after ? ` — retry in ${body.retry_after}s` : '';
+      throw new Error(`Rate limited${wait}`);
+    }
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   }
@@ -161,6 +186,11 @@ function App() {
   const [searchResult, setSearchResult] = useState(null);
   const [error, setError] = useState('');
   const [drawerId, setDrawerId] = useState(null);
+
+  // Access token state
+  const [accessToken, setAccessToken] = useState(() => localStorage.getItem('cv_search_token') || '');
+  const [tokenInput, setTokenInput] = useState('');
+  const [showTokenInput, setShowTokenInput] = useState(false);
 
   // Prescreen state
   const [reqSkills, setReqSkills] = useState([]);
@@ -344,6 +374,19 @@ function App() {
     return j && j.status !== 'completed' && j.status !== 'failed';
   });
 
+  function saveToken(val) {
+    const v = val.trim();
+    if (v) {
+      localStorage.setItem('cv_search_token', v);
+      setAccessToken(v);
+    } else {
+      localStorage.removeItem('cv_search_token');
+      setAccessToken('');
+    }
+    setTokenInput('');
+    setShowTokenInput(false);
+  }
+
   return <div className="app">
     {/* TOPBAR */}
     <div className="topbar">
@@ -358,6 +401,29 @@ function App() {
           <Database size={14} />
           <span><strong>{corpus}</strong> CVs parsed & indexed</span>
         </div>
+        {showTokenInput ? (
+          <div className="token-input-wrap">
+            <input
+              type="password"
+              className="token-input"
+              placeholder="Paste access token…"
+              value={tokenInput}
+              onChange={e => setTokenInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') saveToken(tokenInput); if (e.key === 'Escape') { setShowTokenInput(false); setTokenInput(''); } }}
+              autoFocus
+            />
+            <button className="token-btn token-save" onClick={() => saveToken(tokenInput)}>Save</button>
+            <button className="token-btn token-cancel" onClick={() => { setShowTokenInput(false); setTokenInput(''); }}>Cancel</button>
+          </div>
+        ) : accessToken ? (
+          <button className="token-pill" onClick={() => { setAccessToken(''); localStorage.removeItem('cv_search_token'); setShowTokenInput(true); }} title="Click to reset token">
+            <Zap size={12} /> Token set
+          </button>
+        ) : (
+          <button className="token-pill token-pill-unset" onClick={() => setShowTokenInput(true)} title="Set access token for queries">
+            <Zap size={12} /> Set token
+          </button>
+        )}
         <div className="avatar">HR</div>
       </div>
     </div>
@@ -828,7 +894,7 @@ function App() {
         <div className="drawer-overlay" onClick={() => setDrawerId(null)} />
         <div className="drawer">
           <div className="drawer-head">
-            <div className="card-avatar" style={avatarPalette(drawerCandidate.id ? drawerCandidate.id.length : 0)}>
+            <div className="card-avatar" style={(() => { const [bg, c] = avatarPalette(drawerCandidate.id ? drawerCandidate.id.length : 0); return { background: bg, color: c }; })()}>
               {initials(drawerCandidate.name)}
             </div>
             <div className="drawer-info">
@@ -852,7 +918,7 @@ function App() {
           </div>
           <div className="drawer-footer">
             <button className="btn-primary"><UserCheck size={16} /> Shortlist candidate</button>
-            <button className="btn-secondary"><Download size={16} /> Download CV</button>
+            <a className="btn-secondary" href={`/api/download/${drawerCandidate.id}`} target="_blank" rel="noopener noreferrer"><Download size={16} /> Download CV</a>
           </div>
         </div>
       </>

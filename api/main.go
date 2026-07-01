@@ -124,6 +124,28 @@ func (s *Store) AllCandidates() []Candidate {
 	return out
 }
 
+func (s *Store) GetCandidate(id string) *Candidate {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, c := range s.data.Candidates {
+		if c.ID == id {
+			return &c
+		}
+	}
+	return nil
+}
+
+func (s *Store) CandidateByFileName(name string) *Candidate {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, c := range s.data.Candidates {
+		if c.FileName == name {
+			return &c
+		}
+	}
+	return nil
+}
+
 func (s *Store) DeleteCandidate(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -280,7 +302,10 @@ func (jq *JobQueue) process(ctx context.Context, jobID string) {
 		b, err := cmd.Output()
 		os.Remove(tmpPdf)
 		if err != nil {
-			jq.store.UpdateJob(jobID, func(j *Job) { j.Status = JobFailed; j.Error = fmt.Sprintf("gemini failed and pdftotext failed: %v", err) })
+			jq.store.UpdateJob(jobID, func(j *Job) {
+				j.Status = JobFailed
+				j.Error = fmt.Sprintf("gemini failed and pdftotext failed: %v", err)
+			})
 			return
 		}
 		text = string(b)
@@ -324,7 +349,15 @@ indexCandidate:
 		c = fallbackExtract(job.FileName, text)
 	}
 
-	c.ID = jobID
+	// Preserve original upload file for download
+	preserved := filepath.Join(jq.uploadDir, jobID)
+	os.MkdirAll(preserved, 0o755)
+	os.WriteFile(filepath.Join(preserved, job.FileName), raw, 0o644)
+
+	// Assert candidate ID is set
+	if c.ID == "" {
+		c.ID = jobID
+	}
 	c.FileName = job.FileName
 	c.UploadedAt = time.Now()
 	c.RawText = text
@@ -341,8 +374,6 @@ indexCandidate:
 		j.CandidateID = c.ID
 	})
 
-	// Clean up temp upload file
-	os.Remove(stored)
 	log.Printf("worker: processed %s → %s (%s)", job.FileName, c.Name, mode)
 }
 
@@ -409,7 +440,7 @@ func (g *GeminiClient) ExtractProfileFromDocument(ctx context.Context, fileName 
 		return Candidate{}, fmt.Errorf("unsupported gemini document type: %s", fileName)
 	}
 
-	prompt := `Extract this CV/resume into strict JSON. Return ONLY JSON with keys: name,email,phone,current_title,years_experience,skills,domains,locations,seniority,summary,evidence. evidence is an array of {claim,source_snippet}. Preserve contact details exactly, especially leading + in phone numbers. Use empty strings/arrays if unknown. Never invent facts not supported by the document.`
+	prompt := `Extract this CV/resume into strict JSON. Return ONLY JSON with keys: name,email,phone,current_title,years_experience,skills,domains,locations,seniority,summary,evidence. years_experience must be an integer number of years, not a string. evidence is an array of {claim,source_snippet}. Preserve contact details exactly, especially leading + in phone numbers. Use empty strings/arrays if unknown. Never invent facts not supported by the document.`
 	body := geminiReq{
 		GenerationConfig: geminiGenerationConf{Temperature: 0.0, ResponseMimeType: "application/json"},
 		Contents: []geminiContent{{Role: "user", Parts: []geminiPart{
@@ -442,8 +473,8 @@ func (g *GeminiClient) ExtractProfileFromDocument(ctx context.Context, fileName 
 	}
 	content := strings.TrimSpace(gr.Candidates[0].Content.Parts[0].Text)
 	content = extractJSONObject(content)
-	var c Candidate
-	if err := json.Unmarshal([]byte(content), &c); err != nil {
+	c, err := unmarshalCandidateJSON([]byte(content))
+	if err != nil {
 		return Candidate{}, fmt.Errorf("parse gemini JSON: %w; content=%s", err, truncate(content, 300))
 	}
 	cleanCandidate(&c)
@@ -572,14 +603,14 @@ func (l *LLMClient) completeJSON(ctx context.Context, system, user string) ([]by
 }
 
 func (l *LLMClient) ExtractProfile(ctx context.Context, fileName, text string) (Candidate, error) {
-	system := `You extract CV/resume data. Return ONLY JSON with keys: name,email,phone,current_title,years_experience,skills,domains,locations,seniority,summary,evidence. evidence is an array of {claim,source_snippet}. Use null/empty arrays if unknown. Never invent facts not supported by the CV.`
+	system := `You extract CV/resume data. Return ONLY JSON with keys: name,email,phone,current_title,years_experience,skills,domains,locations,seniority,summary,evidence. years_experience must be an integer number of years, not a string. evidence is an array of {claim,source_snippet}. Use null/empty arrays if unknown. Never invent facts not supported by the CV.`
 	user := fmt.Sprintf("File: %s\n\nCV text:\n%s", fileName, truncate(text, 18000))
 	b, err := l.completeJSON(ctx, system, user)
 	if err != nil {
 		return Candidate{}, err
 	}
-	var c Candidate
-	if err := json.Unmarshal(b, &c); err != nil {
+	c, err := unmarshalCandidateJSON(b)
+	if err != nil {
 		return Candidate{}, err
 	}
 	cleanCandidate(&c)
@@ -655,6 +686,142 @@ type Server struct {
 	jobs      *JobQueue
 	dataDir   string
 	uploadDir string
+	authToken string
+	limiter   *RateLimiter
+}
+
+// ── Access token auth ────────────────────────────────────────────────────
+
+func (s *Server) authMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.authToken == "" {
+			// No token configured → open access
+			next(w, r)
+			return
+		}
+		// Accept Bearer header or ?token= query param
+		token := r.Header.Get("Authorization")
+		if strings.HasPrefix(token, "Bearer ") {
+			token = strings.TrimPrefix(token, "Bearer ")
+		} else {
+			token = r.URL.Query().Get("token")
+		}
+		token = strings.TrimSpace(token)
+		if token == "" || token != s.authToken {
+			w.Header().Set("WWW-Authenticate", "Bearer realm=\"cv-search\"")
+			w.WriteHeader(http.StatusUnauthorized)
+			writeJSON(w, map[string]any{"error": "unauthorized", "detail": "missing or invalid access token"})
+			return
+		}
+		next(w, r)
+	}
+}
+
+// ── Rate limiter (sliding window per-IP, token bucket) ───────────────────
+
+type rateEntry struct {
+	mu       sync.Mutex
+	tokens   float64
+	lastSeen time.Time
+}
+
+type RateLimiter struct {
+	rate     float64       // tokens per second
+	burst    int           // max burst
+	entries  sync.Map      // map[string]*rateEntry
+	ttl      time.Duration // cleanup interval for stale entries
+}
+
+func NewRateLimiter(rpm int, burst int) *RateLimiter {
+	if rpm <= 0 {
+		rpm = 30 // default 30 req/min
+	}
+	if burst <= 0 {
+		burst = 5
+	}
+	rl := &RateLimiter{
+		rate:  float64(rpm) / 60.0,
+		burst: burst,
+		ttl:   10 * time.Minute,
+	}
+	go rl.cleanupLoop()
+	return rl
+}
+
+func (rl *RateLimiter) cleanupLoop() {
+	ticker := time.NewTicker(rl.ttl / 2)
+	defer ticker.Stop()
+	for range ticker.C {
+		cutoff := time.Now().Add(-rl.ttl)
+		rl.entries.Range(func(key, val any) bool {
+			if re, ok := val.(*rateEntry); ok {
+				re.mu.Lock()
+				stale := re.lastSeen.Before(cutoff)
+				re.mu.Unlock()
+				if stale {
+					rl.entries.Delete(key)
+				}
+			}
+			return true
+		})
+	}
+}
+
+func (rl *RateLimiter) allow(ip string) (allowed bool, retryAfter time.Duration) {
+	val, _ := rl.entries.LoadOrStore(ip, &rateEntry{tokens: float64(rl.burst), lastSeen: time.Now()})
+	re := val.(*rateEntry)
+	re.mu.Lock()
+	defer re.mu.Unlock()
+
+	now := time.Now()
+	elapsed := now.Sub(re.lastSeen).Seconds()
+	re.lastSeen = now
+
+	// Refill tokens
+	re.tokens += elapsed * rl.rate
+	if re.tokens > float64(rl.burst) {
+		re.tokens = float64(rl.burst)
+	}
+
+	if re.tokens >= 1.0 {
+		re.tokens -= 1.0
+		return true, 0
+	}
+
+	// Calculate retry-after: time to accumulate 1 token
+	deficit := 1.0 - re.tokens
+	retryAfter = time.Duration(deficit/rl.rate*float64(time.Second))
+	return false, retryAfter
+}
+
+func (rl *RateLimiter) middleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ip := r.Header.Get("X-Forwarded-For")
+		if ip == "" {
+			ip = r.RemoteAddr
+		}
+		// Trim port
+		if idx := strings.LastIndex(ip, ":"); idx != -1 {
+			ip = ip[:idx]
+		}
+		// If X-Forwarded-For has multiple IPs, take the first (client IP)
+		if commaIdx := strings.Index(ip, ","); commaIdx != -1 {
+			ip = strings.TrimSpace(ip[:commaIdx])
+		}
+
+		allowed, retryAfter := rl.allow(ip)
+		if !allowed {
+			w.Header().Set("Retry-After", strconv.Itoa(int(retryAfter.Seconds())+1))
+			w.WriteHeader(http.StatusTooManyRequests)
+			writeJSON(w, map[string]any{
+				"error":       "rate_limited",
+				"detail":      "too many requests, slow down",
+				"retry_after": int(retryAfter.Seconds()) + 1,
+			})
+			return
+		}
+		next(w, r)
+	}
 }
 
 func main() {
@@ -676,8 +843,22 @@ func main() {
 		log.Fatal(err)
 	}
 
+	authToken := strings.TrimSpace(getenvFirst("ACCESS_TOKEN", "CV_SEARCH_TOKEN"))
+	rateLimit := getenvDefault("RATE_LIMIT_RPM", "30") // requests per minute
+	rateBurst := getenvDefault("RATE_LIMIT_BURST", "5") // max burst
+	rpm, _ := strconv.Atoi(rateLimit)
+	burst, _ := strconv.Atoi(rateBurst)
+	limiter := NewRateLimiter(rpm, burst)
+
+	if authToken != "" {
+		log.Printf("access token auth enabled on /api/search and /api/job-match")
+	} else {
+		log.Printf("WARNING: no ACCESS_TOKEN set — query endpoints are open")
+	}
+	log.Printf("rate limit: %d rpm, burst %d", rpm, burst)
+
 	jobs := NewJobQueue(store, llm, gemini, uploadDir, textDir)
-	s := &Server{store: store, llm: llm, gemini: gemini, jobs: jobs, dataDir: dataDir, uploadDir: uploadDir}
+	s := &Server{store: store, llm: llm, gemini: gemini, jobs: jobs, dataDir: dataDir, uploadDir: uploadDir, authToken: authToken, limiter: limiter}
 
 	// Start background worker pool
 	workerCount := 3
@@ -692,8 +873,11 @@ func main() {
 	mux.HandleFunc("DELETE /api/candidates/{id}", s.deleteCandidate)
 	mux.HandleFunc("POST /api/upload", s.upload)
 	mux.HandleFunc("GET /api/jobs", s.getJobs)
-	mux.HandleFunc("POST /api/search", s.search)
-	mux.HandleFunc("POST /api/job-match", s.jobMatch)
+	mux.HandleFunc("POST /api/search", s.limiter.middleware(s.authMiddleware(s.search)))
+	mux.HandleFunc("POST /api/job-match", s.limiter.middleware(s.authMiddleware(s.jobMatch)))
+	mux.HandleFunc("GET /api/download/{id}", s.downloadFile)
+	mux.HandleFunc("GET /api/pdfs", s.listSamplePDFs)
+	mux.Handle("GET /pdfs/", http.StripPrefix("/pdfs/", http.FileServer(http.Dir("/app/sample-pdfs"))))
 	mux.HandleFunc("/", serveSPA("web/dist"))
 
 	log.Printf("CV Search Prototype listening on :%s (LLM enabled: %v, Gemini OCR enabled: %v)", port, s.llm.Enabled(), s.gemini.Enabled())
@@ -721,9 +905,6 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) candidates(w http.ResponseWriter, r *http.Request) {
 	items := s.store.AllCandidates()
-	for i := range items {
-		items[i].RawText = ""
-	}
 	writeJSON(w, map[string]any{"candidates": items})
 }
 
@@ -743,6 +924,50 @@ func (s *Server) deleteCandidate(w http.ResponseWriter, r *http.Request) {
 	uploadPath := filepath.Join(s.uploadDir, id+"-work")
 	os.Remove(uploadPath)
 	writeJSON(w, map[string]any{"ok": true})
+}
+
+// ── Download original CV file ────────────────────────────────────────────
+
+func (s *Server) downloadFile(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		http.Error(w, "id required", http.StatusBadRequest)
+		return
+	}
+	c := s.store.GetCandidate(id)
+	if c == nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	path := filepath.Join(s.uploadDir, id, c.FileName)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		http.Error(w, "file not available", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, c.FileName))
+	http.ServeFile(w, r, path)
+}
+
+// ── List sample PDFs ─────────────────────────────────────────────────────
+
+func (s *Server) listSamplePDFs(w http.ResponseWriter, r *http.Request) {
+	entries, err := os.ReadDir("/app/sample-pdfs")
+	if err != nil {
+		writeJSON(w, map[string]any{"pdfs": []string{}, "error": err.Error()})
+		return
+	}
+	files := []map[string]any{}
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(strings.ToLower(e.Name()), ".pdf") {
+			c := s.store.CandidateByFileName(e.Name())
+			seeded := c != nil
+			files = append(files, map[string]any{
+				"file_name": e.Name(),
+				"seeded":    seeded,
+			})
+		}
+	}
+	writeJSON(w, map[string]any{"pdfs": files})
 }
 
 // ── Async upload: creates jobs, returns immediately ─────────────────────
@@ -1198,6 +1423,84 @@ func snippetAround(text, term string) string {
 	end := min(len(text), i+len(term)+140)
 	return strings.Join(strings.Fields(text[start:end]), " ")
 }
+func unmarshalCandidateJSON(b []byte) (Candidate, error) {
+	type candidateWire struct {
+		ID              string          `json:"id"`
+		FileName        string          `json:"file_name"`
+		UploadedAt      time.Time       `json:"uploaded_at"`
+		Name            string          `json:"name"`
+		Email           string          `json:"email"`
+		Phone           string          `json:"phone"`
+		CurrentTitle    string          `json:"current_title"`
+		YearsExperience json.RawMessage `json:"years_experience"`
+		Skills          []string        `json:"skills"`
+		Domains         []string        `json:"domains"`
+		Locations       []string        `json:"locations"`
+		Seniority       string          `json:"seniority"`
+		Summary         string          `json:"summary"`
+		Evidence        []Evidence      `json:"evidence"`
+		RawText         string          `json:"raw_text,omitempty"`
+	}
+	var w candidateWire
+	if err := json.Unmarshal(b, &w); err != nil {
+		return Candidate{}, err
+	}
+	years, err := parseYearsJSON(w.YearsExperience)
+	if err != nil {
+		return Candidate{}, err
+	}
+	return Candidate{
+		ID:              w.ID,
+		FileName:        w.FileName,
+		UploadedAt:      w.UploadedAt,
+		Name:            w.Name,
+		Email:           w.Email,
+		Phone:           w.Phone,
+		CurrentTitle:    w.CurrentTitle,
+		YearsExperience: years,
+		Skills:          w.Skills,
+		Domains:         w.Domains,
+		Locations:       w.Locations,
+		Seniority:       w.Seniority,
+		Summary:         w.Summary,
+		Evidence:        w.Evidence,
+		RawText:         w.RawText,
+	}, nil
+}
+
+func parseYearsJSON(raw json.RawMessage) (int, error) {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return 0, nil
+	}
+	var n int
+	if err := json.Unmarshal(raw, &n); err == nil {
+		return clampYears(n), nil
+	}
+	var f float64
+	if err := json.Unmarshal(raw, &f); err == nil {
+		return clampYears(int(f)), nil
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		re := regexp.MustCompile(`\d{1,2}`)
+		m := re.FindString(s)
+		if m == "" {
+			return 0, nil
+		}
+		years, _ := strconv.Atoi(m)
+		return clampYears(years), nil
+	}
+	return 0, fmt.Errorf("unsupported years_experience value: %s", truncate(string(raw), 80))
+}
+
+func clampYears(years int) int {
+	if years < 0 || years > 60 {
+		return 0
+	}
+	return years
+}
+
 func cleanCandidate(c *Candidate) {
 	c.Name = strings.TrimSpace(c.Name)
 	c.Email = strings.TrimSpace(c.Email)
