@@ -81,6 +81,14 @@ const api = {
     }
     if (!res.ok) throw new Error(await res.text());
     return res.json();
+  },
+  async verifyToken(token) {
+    const res = await fetch('/api/verify-token', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (res.status === 401) throw new Error('Invalid access token');
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
   }
 };
 
@@ -187,10 +195,11 @@ function App() {
   const [error, setError] = useState('');
   const [drawerId, setDrawerId] = useState(null);
 
-  // Access token state
-  const [accessToken, setAccessToken] = useState(() => localStorage.getItem('cv_search_token') || '');
-  const [tokenInput, setTokenInput] = useState('');
-  const [showTokenInput, setShowTokenInput] = useState(false);
+  // Access token state — login gate
+  const [loggedIn, setLoggedIn] = useState(false);
+  const [verifying, setVerifying] = useState(true);
+  const [loginError, setLoginError] = useState('');
+  const [loginTokenInput, setLoginTokenInput] = useState('');
 
   // Prescreen state
   const [reqSkills, setReqSkills] = useState([]);
@@ -215,6 +224,18 @@ function App() {
     setCandidates(c.candidates || []);
   }
   useEffect(() => { refresh().catch(e => setError(e.message)); }, []);
+
+  // Verify stored token on mount — gate the app behind login
+  useEffect(() => {
+    const stored = localStorage.getItem('cv_search_token');
+    if (!stored) {
+      setVerifying(false);
+      return;
+    }
+    api.verifyToken(stored)
+      .then(() => { setLoggedIn(true); setVerifying(false); })
+      .catch(() => { localStorage.removeItem('cv_search_token'); setVerifying(false); });
+  }, []);
 
   useEffect(() => {
     if (!activeJobIds.length) return;
@@ -374,17 +395,51 @@ function App() {
     return j && j.status !== 'completed' && j.status !== 'failed';
   });
 
-  function saveToken(val) {
-    const v = val.trim();
-    if (v) {
+  async function handleLogin() {
+    const v = loginTokenInput.trim();
+    if (!v) return;
+    setLoginError('');
+    try {
+      await api.verifyToken(v);
       localStorage.setItem('cv_search_token', v);
-      setAccessToken(v);
-    } else {
-      localStorage.removeItem('cv_search_token');
-      setAccessToken('');
+      setLoggedIn(true);
+    } catch (e) {
+      setLoginError(e.message || 'Invalid access token');
     }
-    setTokenInput('');
-    setShowTokenInput(false);
+  }
+
+  if (verifying) {
+    return <div className="app"><div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', color:'var(--gray)' }}>
+      <Loader2 size={24} className="spin" />&nbsp;&nbsp;Verifying access…
+    </div></div>;
+  }
+
+  if (!loggedIn) {
+    return <div className="app">
+      <div className="login-overlay">
+        <div className="login-card">
+          <div className="login-logo"><Box size={22} /></div>
+          <div className="login-title">Recruitment</div>
+          <div className="login-subtitle">CV Document Search <span className="badge-poc">POC</span></div>
+          <div className="login-desc">Enter your access token to continue.</div>
+          {loginError && <div className="login-error"><AlertCircle size={16} />{loginError}</div>}
+          <div className="login-form">
+            <input
+              type="password"
+              className="login-input"
+              placeholder="Access token"
+              value={loginTokenInput}
+              onChange={e => setLoginTokenInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') handleLogin(); }}
+              autoFocus
+            />
+            <button className="login-btn" onClick={handleLogin}>
+              Sign in
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>;
   }
 
   return <div className="app">
@@ -401,29 +456,6 @@ function App() {
           <Database size={14} />
           <span><strong>{corpus}</strong> CVs parsed & indexed</span>
         </div>
-        {showTokenInput ? (
-          <div className="token-input-wrap">
-            <input
-              type="password"
-              className="token-input"
-              placeholder="Paste access token…"
-              value={tokenInput}
-              onChange={e => setTokenInput(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') saveToken(tokenInput); if (e.key === 'Escape') { setShowTokenInput(false); setTokenInput(''); } }}
-              autoFocus
-            />
-            <button className="token-btn token-save" onClick={() => saveToken(tokenInput)}>Save</button>
-            <button className="token-btn token-cancel" onClick={() => { setShowTokenInput(false); setTokenInput(''); }}>Cancel</button>
-          </div>
-        ) : accessToken ? (
-          <button className="token-pill" onClick={() => { setAccessToken(''); localStorage.removeItem('cv_search_token'); setShowTokenInput(true); }} title="Click to reset token">
-            <Zap size={12} /> Token set
-          </button>
-        ) : (
-          <button className="token-pill token-pill-unset" onClick={() => setShowTokenInput(true)} title="Set access token for queries">
-            <Zap size={12} /> Set token
-          </button>
-        )}
         <div className="avatar">HR</div>
       </div>
     </div>

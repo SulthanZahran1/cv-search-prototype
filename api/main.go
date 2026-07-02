@@ -876,6 +876,7 @@ func main() {
 	mux.HandleFunc("POST /api/search", s.limiter.middleware(s.authMiddleware(s.search)))
 	mux.HandleFunc("POST /api/job-match", s.limiter.middleware(s.authMiddleware(s.jobMatch)))
 	mux.HandleFunc("GET /api/download/{id}", s.downloadFile)
+	mux.HandleFunc("GET /api/verify-token", s.limiter.middleware(s.authMiddleware(s.verifyToken)))
 	mux.HandleFunc("GET /api/pdfs", s.listSamplePDFs)
 	mux.Handle("GET /pdfs/", http.StripPrefix("/pdfs/", http.FileServer(http.Dir("/app/sample-pdfs"))))
 	mux.HandleFunc("/", serveSPA("web/dist"))
@@ -946,6 +947,12 @@ func (s *Server) downloadFile(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, c.FileName))
 	http.ServeFile(w, r, path)
+}
+
+// ── Verify access token (login gate) ──────────────────────────────────────
+
+func (s *Server) verifyToken(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, map[string]any{"ok": true, "token_valid": true})
 }
 
 // ── List sample PDFs ─────────────────────────────────────────────────────
