@@ -4,7 +4,7 @@ html,body{margin:0;padding:0;max-width:100%;overflow-x:hidden}
 body{background:var(--bg);font-family:var(--font);color:var(--text);font-size:14px;line-height:1.5}
 #root{max-width:100%;overflow-x:hidden}
 ::selection{background:#a5003422}
-.app{min-height:100vh;display:flex;flex-direction:column}
+.app{min-height:100dvh;display:flex;flex-direction:column}
 .spin{animation:spin 1s linear infinite}
 @keyframes spin{100%{transform:rotate(360deg)}}
 @keyframes slidein{from{transform:translateX(30px);opacity:.6}to{transform:translateX(0);opacity:1}}
@@ -193,7 +193,7 @@ body{background:var(--bg);font-family:var(--font);color:var(--text);font-size:14
 .alert svg{width:18px;height:18px;flex:none}
 
 /* LOGIN OVERLAY */
-.login-overlay{display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px}
+.login-overlay{display:flex;align-items:center;justify-content:center;min-height:100dvh;padding:20px}
 .login-card{background:#fff;border:1px solid var(--border);border-radius:14px;padding:40px 36px;width:100%;max-width:400px;text-align:center;box-shadow:0 8px 30px rgba(15,23,42,.1)}
 .login-logo{width:48px;height:48px;border-radius:12px;background:var(--primary);display:flex;align-items:center;justify-content:center;color:#fff;margin:0 auto 16px}
 .login-title{font-size:20px;font-weight:800;letter-spacing:-.3px}

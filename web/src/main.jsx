@@ -51,7 +51,7 @@ const api = {
     if (res.status === 401) throw new Error('Unauthorized: invalid or missing access token');
     if (res.status === 429) {
       const body = await res.json().catch(() => ({}));
-      const wait = body.retry_after ? ` — retry in ${body.retry_after}s` : '';
+      const wait = body.retry_after ? `, retry in ${body.retry_after}s` : '';
       throw new Error(`Rate limited${wait}`);
     }
     if (!res.ok) throw new Error(await res.text());
@@ -76,7 +76,7 @@ const api = {
     if (res.status === 401) throw new Error('Unauthorized: invalid or missing access token');
     if (res.status === 429) {
       const body = await res.json().catch(() => ({}));
-      const wait = body.retry_after ? ` — retry in ${body.retry_after}s` : '';
+      const wait = body.retry_after ? `, retry in ${body.retry_after}s` : '';
       throw new Error(`Rate limited${wait}`);
     }
     if (!res.ok) throw new Error(await res.text());
@@ -195,7 +195,7 @@ function App() {
   const [error, setError] = useState('');
   const [drawerId, setDrawerId] = useState(null);
 
-  // Access token state — login gate
+  // Access token state , login gate
   const [loggedIn, setLoggedIn] = useState(false);
   const [verifying, setVerifying] = useState(true);
   const [loginError, setLoginError] = useState('');
@@ -225,7 +225,7 @@ function App() {
   }
   useEffect(() => { refresh().catch(e => setError(e.message)); }, []);
 
-  // Verify stored token on mount — gate the app behind login
+  // Verify stored token on mount , gate the app behind login
   useEffect(() => {
     const stored = localStorage.getItem('cv_search_token');
     if (!stored) {
@@ -409,7 +409,7 @@ function App() {
   }
 
   if (verifying) {
-    return <div className="app"><div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', color:'var(--gray)' }}>
+    return <div className="app"><div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100dvh', color:'var(--gray)' }}>
       <Loader2 size={24} className="spin" />&nbsp;&nbsp;Verifying access…
     </div></div>;
   }
@@ -529,7 +529,7 @@ function App() {
               value={input} onChange={e => setInput(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addToken(e.target.value); } else if (e.key === 'Backspace' && !input && tokens.length > 0) { setTokens(tokens.slice(0, -1)); } }}
               onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
-              placeholder={tokens.length === 0 ? 'Search a skill — e.g. Go, Kubernetes, NLP…' : 'Add another skill…'}
+              placeholder={tokens.length === 0 ? 'Search a skill, e.g. Go, Kubernetes, NLP...' : 'Add another skill...'}
               className="token-field"
             />
           </div>
@@ -537,7 +537,7 @@ function App() {
             <Plus size={17} /> Add skill
           </button>
         </div>
-        <div className="input-hint">Type a skill and press <strong>Enter</strong> to add it. Add several — candidates are ranked by how many they match.</div>
+        <div className="input-hint">Type a skill and press <strong>Enter</strong> to add it. Add several. Candidates are ranked by how many they match.</div>
 
         {/* FILTERS ROW */}
         <div className="filters-row">
@@ -575,7 +575,7 @@ function App() {
           {mode === 'semantic' && tokens.length > 0 && (
             <div className="semantic-banner">
               <GitBranch size={14} />
-              <span>Semantic search also looks for related skills — catching candidates who described the skill differently.</span>
+              <span>Semantic search also looks for related skills, catching candidates who described the skill differently.</span>
             </div>
           )}
           <div className="try-section">
@@ -612,7 +612,7 @@ function App() {
           <div className="empty-state">
             <FileSearch2 size={34} />
             <div className="empty-title">Add a skill to search across every CV</div>
-            <div className="empty-desc">Semantic search scans the full text of <strong>{corpus}</strong> parsed CVs — not just the Skills field — so you catch candidates who described it in their own words.</div>
+            <div className="empty-desc">Semantic search scans the full text of <strong>{corpus}</strong> parsed CVs, not just the Skills field, so you catch candidates who described it in their own words.</div>
           </div>
         )}
         {tokens.length > 0 && activeSearchResults.results.length === 0 && !searching && (
@@ -674,7 +674,7 @@ function App() {
         <div className="criteria-header">
           <Briefcase size={18} />
           <span className="criteria-title">Job description matching</span>
-          <span className="criteria-meta">— LLM hunts for the best candidates in the CV DB</span>
+          <span className="criteria-meta">LLM hunts for the best candidates in the CV DB</span>
         </div>
         <textarea
           className="jd-textarea"
@@ -834,7 +834,7 @@ function App() {
         <div className="criteria-header">
           <ListChecks size={18} />
           <span className="criteria-title">Screening criteria</span>
-          <span className="criteria-meta">— auto-screen all {corpus} parsed CVs against these</span>
+          <span className="criteria-meta">Auto-screen all {corpus} parsed CVs against these</span>
         </div>
         <div className="criteria-grid">
           <div>
